@@ -200,6 +200,45 @@ class NormalSelfProtectTest(GuardBase):
         self.assertEqual(self.bash(command + " ; echo done"), guard.DENY)
 
 
+class SwitchCommandTest(GuardBase):
+    """끄기와 지우기는 금지가 아니라 사람의 허락 한 번. 켜기는 묻지 않는다."""
+
+    def switch(self, arg):
+        return "%s -I -B %s %s" % (self.py, self.script("switch.py"), arg)
+
+    def test_off_and_uninstall_ask(self):
+        self.assertEqual(self.decide("Bash", {"command": self.switch("off")}), (guard.ASK, "SWITCH_OFF_ASK"))
+        self.assertEqual(self.decide("Bash", {"command": self.switch("uninstall")}), (guard.ASK, "UNINSTALL_ASK"))
+
+    def test_on_passes(self):
+        self.assertEqual(self.decide("Bash", {"command": self.switch("on")}), (guard.PASS, "OK"))
+
+    def test_same_in_vet_mode(self):
+        self.start_vet()
+        self.assertEqual(self.bash(self.switch("off")), guard.ASK)
+        self.assertEqual(self.bash(self.switch("uninstall")), guard.ASK)
+        self.assertEqual(self.bash(self.switch("on")), guard.PASS)
+
+    def test_allowed_when_state_broken(self):
+        os.makedirs(os.path.join(self.state, "sessions"))
+        with open(os.path.join(self.state, "sessions", "s1.json"), "w") as handle:
+            handle.write("{broken")
+        self.assertEqual(self.bash(self.switch("off")), guard.ASK)
+
+    def test_direct_ways_still_denied_with_hint(self):
+        action, code = self.decide("Bash", {"command": "touch ~/.claude/skill-bound-state/OFF"})
+        self.assertEqual((action, code), (guard.DENY, "PROTECTED"))
+        self.assertIn("switch.py", guard.MESSAGES["PROTECTED"])
+        self.assertEqual(self.action("Write", {"file_path": os.path.join(self.state, "OFF")}), guard.DENY)
+        self.assertEqual(self.bash("rm -rf ~/.claude/skills/skill-bound"), guard.DENY)
+
+    def test_tricks_with_switch_denied(self):
+        for command in (self.switch("off") + "; rm -rf ~", self.switch("off off"),
+                        "python3 %s off" % self.script("switch.py"), self.switch("'off'")):
+            with self.subTest(command=command):
+                self.assertEqual(self.bash(command), guard.DENY)
+
+
 # ---------------------------------------------------------------------------
 # 점검 모드
 # ---------------------------------------------------------------------------

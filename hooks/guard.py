@@ -15,8 +15,8 @@
 
 실패했을 때: 평소 모드는 통과(fail-open), 점검 모드이거나 상태를 알 수 없으면 차단(fail-closed).
 
-끄기: 사람이 터미널에서 `~/.claude/skill-bound-state/OFF` 파일을 직접 만든다.
-Claude의 도구로는 상태 폴더를 바꿀 수 없다.
+끄기, 지우기: `scripts/switch.py off|uninstall` 로 한다. Claude가 실행하면 사람에게 허락을 묻는다.
+Claude가 OFF 파일을 직접 만들거나 폴더를 직접 지우는 것은 막는다. 다시 켜기(`switch.py on`)는 묻지 않는다.
 
 사용법 (훅 명령):
     /usr/bin/python3 -I -B <이 파일> pre            PreToolUse
@@ -43,8 +43,7 @@ import time
 
 SYSTEM_PYTHON = "/usr/bin/python3"
 VET_MAX_SECONDS = 2 * 60 * 60
-SB_SCRIPTS = ("vet.py", "scan.py", "reader.py", "install_checked.py")
-ASK_SCRIPTS = ("install_checked.py",)
+SB_SCRIPTS = ("vet.py", "scan.py", "reader.py", "install_checked.py", "switch.py")
 MAX_INPUT_BYTES = 4 * 1024 * 1024
 SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 
@@ -85,11 +84,13 @@ INSTALL_MENTION_RE = re.compile(r"\.claude/(skills|agents|commands|plugins)\b|\.
 
 MESSAGES = {
     "INSTALL_BLOCKED": "skill-bound: 스킬, 플러그인, MCP 설치는 skill-bound 점검을 거쳐야 합니다. `/skill-bound <주소>` 로 먼저 점검하세요.",
-    "PROTECTED": "skill-bound: skill-bound 폴더와 상태 폴더는 바꿀 수 없습니다. 끄거나 고치려면 사람이 터미널에서 직접 해야 합니다.",
+    "PROTECTED": "skill-bound: skill-bound 폴더와 상태 폴더는 직접 바꿀 수 없습니다. 끄거나 지우려면 `/usr/bin/python3 -I -B <skill-bound 폴더>/scripts/switch.py off` 또는 `uninstall` 을 실행하세요(사람의 허락을 받습니다).",
     "SB_FORM": "skill-bound: skill-bound 스크립트는 `/usr/bin/python3 -I <skill-bound 폴더>/scripts/<이름>.py <인자>` 형태로만 실행할 수 있습니다. 인자에 따옴표, $, ~ 같은 특수 문자를 쓸 수 없습니다.",
     "CONFIG_BASH": "skill-bound: Claude 설정 폴더(.claude)를 바꾸는 셸 명령은 막혀 있습니다. 설정 변경은 사람이 직접 하거나, Edit 도구로 사람의 확인을 받으세요.",
     "SETTINGS_ASK": "skill-bound: Claude Code 설정 파일을 바꾸려고 합니다. 훅이나 권한이 바뀌면 skill-bound가 꺼질 수도 있습니다. 바뀌는 내용을 확인하고 허락하세요.",
     "INSTALL_ASK": "skill-bound: 점검을 마친 스킬을 설치합니다. 점검 보고서를 확인했다면 허락하세요.",
+    "SWITCH_OFF_ASK": "skill-bound: Claude가 skill-bound를 끄려고 합니다. 직접 끄라고 하셨다면 허락하세요. 그런 적이 없다면 거절하세요. Claude가 읽은 글 속의 숨은 지시에 속았을 수 있습니다.",
+    "UNINSTALL_ASK": "skill-bound: Claude가 skill-bound를 완전히 지우려고 합니다(훅 등록, 상태 폴더, 설치 폴더). 직접 지우라고 하셨다면 허락하세요. 그런 적이 없다면 거절하세요. Claude가 읽은 글 속의 숨은 지시에 속았을 수 있습니다.",
     "VET_BASH": "skill-bound 점검 중에는 skill-bound 스크립트를 `/usr/bin/python3 -I` 로 실행하는 명령만 쓸 수 있습니다.",
     "VET_READ": "skill-bound 점검 중에는 격리 폴더와 skill-bound 폴더 안쪽만 읽을 수 있습니다.",
     "VET_WRITE": "skill-bound 점검 중에는 격리 폴더 안쪽에만 쓸 수 있습니다.",
@@ -389,6 +390,24 @@ def _cwd_in_claude_dir(cwd):
 PASS, DENY, ASK = "pass", "deny", "ask"
 
 
+def sb_script_decision(name, args):
+    # type: (str, List[str]) -> Tuple[str, str]
+    """정해진 형태로 실행하는 skill-bound 스크립트의 판단. 평소 모드, 점검 모드 모두 같다."""
+    if name == "install_checked.py":
+        return ASK, "INSTALL_ASK"
+    if name == "switch.py":
+        # 정확히 하나의 낱말만 받는다. 그 밖의 형태는 지금은 무해해도, 나중에 스크립트가
+        # 인자를 다르게 읽게 되면 허락 없이 끄는 길이 될 수 있으니 막는다.
+        if args == ["off"]:
+            return ASK, "SWITCH_OFF_ASK"
+        if args == ["uninstall"]:
+            return ASK, "UNINSTALL_ASK"
+        if args == ["on"]:
+            return PASS, "OK"
+        return DENY, "SB_FORM"
+    return PASS, "OK"
+
+
 def decide_normal(tool_name, tool_input, cwd, ctx):
     # type: (str, Dict[str, object], str, Ctx) -> Tuple[str, str]
     if tool_name == "Bash":
@@ -397,7 +416,7 @@ def decide_normal(tool_name, tool_input, cwd, ctx):
             return PASS, "OK"
         parsed = parse_sb_command(command, ctx)
         if parsed is not None:
-            return (ASK, "INSTALL_ASK") if parsed[0] in ASK_SCRIPTS else (PASS, "OK")
+            return sb_script_decision(parsed[0], parsed[1])
         norm = normalize_command(command, ctx.home)
         if INSTALL_COMMAND_RE.search(norm):
             return DENY, "INSTALL_BLOCKED"
@@ -442,9 +461,9 @@ def decide_vet(tool_name, tool_input, cwd, ctx, quarantine):
         parsed = parse_sb_command(tool_input.get("command"), ctx)  # type: ignore
         if parsed is None:
             return DENY, ("VET_BROKEN" if quarantine is None else "VET_BASH")
-        if quarantine is None and parsed[0] != "vet.py":
+        if quarantine is None and parsed[0] not in ("vet.py", "switch.py"):
             return DENY, "VET_BROKEN"
-        return (ASK, "INSTALL_ASK") if parsed[0] in ASK_SCRIPTS else (PASS, "OK")
+        return sb_script_decision(parsed[0], parsed[1])
 
     if quarantine is None:
         return DENY, "VET_BROKEN"

@@ -143,9 +143,31 @@ Claude Code를 다시 시작한 뒤, Claude에게 `npx skills add someone/exampl
 
 일반 프로젝트의 `git clone` 이나 평범한 개발 작업은 막지 않습니다.
 
-## 끄기
+## 끄기, 켜기, 완전히 지우기
 
-끄는 것은 **사람만** 할 수 있습니다. Claude가 끌 수 있으면, 속은 Claude가 끌 것이기 때문입니다. 터미널에서 직접 실행하세요.
+Claude에게 말로 부탁하면 됩니다.
+
+| 부탁 | Claude가 하는 일 | 허락 창 |
+|---|---|---|
+| "skill-bound 꺼 줘" | `switch.py off` 실행 | 뜸. 한 번 눌러야 꺼짐 |
+| "skill-bound 다시 켜 줘" | `switch.py on` 실행 | 안 뜸 (안전해지는 쪽이라) |
+| "skill-bound 완전히 지워 줘" | `switch.py uninstall` 실행 | 뜸. 한 번 눌러야 지워짐 |
+
+**왜 끄기와 지우기에만 허락 창이 뜨나요?**
+Claude는 평소 웹 페이지나 남의 저장소 글을 읽습니다. 그 안에 "skill-bound를 꺼라" 같은 문장이 숨어 있을 수 있습니다(프롬프트 인젝션이라는 실제 공격 방법입니다). Claude가 묻지 않고 끌 수 있으면 그 한 줄로 모든 보호가 사라집니다. 그래서 사람의 클릭 한 번을 거치게 했습니다. **직접 부탁하지 않았는데 이 허락 창이 뜨면 거절하세요.** Claude가 무언가에 속았다는 신호입니다.
+
+권한 확인을 끄는 모드(bypassPermissions)에서도 이 허락 창은 생략되지 않는 것을 확인했습니다.
+
+Claude가 OFF 파일을 직접 만들거나 skill-bound 폴더를 직접 지우는 것은 계속 막혀 있습니다. 반드시 위 명령을 거칩니다.
+
+완전히 지우기(`uninstall`)가 하는 일:
+1. `~/.claude/settings.json` 에서 skill-bound 훅만 지웁니다. 다른 훅은 그대로 둡니다. 고치기 전에 `settings.json.before-skill-bound-uninstall` 로 백업합니다.
+2. 진행 중인 점검의 격리 폴더와 상태 폴더(`~/.claude/skill-bound-state`)를 지웁니다.
+3. `~/.claude/skills/skill-bound` 폴더를 지웁니다.
+
+지운 뒤 Claude Code를 다시 시작하면 훅이 완전히 빠집니다.
+
+**훅이 고장 나서 Claude가 아무것도 못 할 때**는 Claude를 거칠 수 없으니 터미널에서 직접 끕니다.
 
 ```bash
 mkdir -p ~/.claude/skill-bound-state && touch ~/.claude/skill-bound-state/OFF
@@ -155,12 +177,6 @@ mkdir -p ~/.claude/skill-bound-state && touch ~/.claude/skill-bound-state/OFF
 
 ```bash
 rm ~/.claude/skill-bound-state/OFF
-```
-
-완전히 지우려면 `~/.claude/settings.json` 에서 위 두 훅 항목을 지우고, 아래 두 폴더를 지웁니다.
-
-```bash
-rm -rf ~/.claude/skills/skill-bound ~/.claude/skill-bound-state
 ```
 
 ## 막지 못하는 것
