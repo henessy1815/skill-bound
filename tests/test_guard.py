@@ -166,6 +166,73 @@ class NormalInstallTest(GuardBase):
                          guard.DENY)
 
 
+class SettingsHookRemovalTest(GuardBase):
+    """통합 시험 5에서 찾은 길: Claude가 switch.py 대신 설정 파일을 고쳐 훅을 지우려 했다."""
+
+    OUR = "/usr/bin/python3 -I -B ~/.claude/skills/skill-bound/hooks/guard.py pre"
+
+    def setUp(self):
+        GuardBase.setUp(self)
+        self.settings = os.path.join(self.project, ".claude", "settings.local.json")
+        os.makedirs(os.path.dirname(self.settings))
+        self.original = json.dumps({"hooks": {"PreToolUse": [{"matcher": "*", "hooks": [
+            {"type": "command", "command": self.OUR}]}]}, "permissions": {"allow": []}}, indent=2)
+        with open(self.settings, "w") as handle:
+            handle.write(self.original)
+
+    def test_write_without_our_hook_denied(self):
+        self.assertEqual(self.decide("Write", {"file_path": self.settings, "content": '{"hooks": {}}'}),
+                         (guard.DENY, "HOOK_REMOVAL"))
+
+    def test_write_keeping_our_hook_asks(self):
+        content = self.original.replace('"allow": []', '"allow": ["Bash(npm test)"]')
+        self.assertEqual(self.decide("Write", {"file_path": self.settings, "content": content}),
+                         (guard.ASK, "SETTINGS_ASK"))
+
+    def test_edit_removing_our_hook_denied(self):
+        self.assertEqual(self.action("Edit", {"file_path": self.settings, "old_string": self.OUR, "new_string": "echo"}),
+                         guard.DENY)
+
+    def test_unrelated_edit_asks(self):
+        self.assertEqual(self.decide("Edit", {"file_path": self.settings, "old_string": '"allow": []',
+                                               "new_string": '"allow": ["Read"]'}), (guard.ASK, "SETTINGS_ASK"))
+
+    def test_disable_all_hooks_denied(self):
+        self.assertEqual(self.action("Edit", {"file_path": self.settings, "old_string": '"permissions"',
+                                              "new_string": '"disableAllHooks": true, "permissions"'}), guard.DENY)
+        user_settings = os.path.join(self.home, ".claude", "settings.json")
+        self.assertEqual(self.action("Write", {"file_path": user_settings, "content": '{"disableAllHooks": true}'}),
+                         guard.DENY)
+
+    def test_multiedit(self):
+        edits = [{"old_string": '"allow": []', "new_string": '"allow": ["Read"]'},
+                 {"old_string": self.OUR, "new_string": "true"}]
+        self.assertEqual(self.action("MultiEdit", {"file_path": self.settings, "edits": edits}), guard.DENY)
+
+    def test_new_settings_file_without_hook_asks(self):
+        other = os.path.join(self.home, ".claude", "settings.json")
+        self.assertEqual(self.decide("Write", {"file_path": other, "content": '{"model": "opus"}'}),
+                         (guard.ASK, "SETTINGS_ASK"))
+
+
+class DevNullRedirectTest(GuardBase):
+    """통합 시험 5: 설정을 읽기만 하는 명령이 2>/dev/null 때문에 "설치"로 오해받아 막혔다."""
+
+    def test_reading_with_dev_null_passes(self):
+        command = ('cd /Users/x/skill-bound-test; ls -la . .claude 2>/dev/null; for f in ~/.claude/settings.json '
+                   '.claude/settings.local.json; do echo "== $f"; cat "$f" 2>/dev/null; done; '
+                   'ls ~/.claude/skills ~/.claude/plugins 2>/dev/null; grep -rl "skill-bound" ~/.claude/skills')
+        self.assertEqual(self.bash(command), guard.PASS)
+        self.assertEqual(self.bash("ls ~/.claude/skills >/dev/null 2>&1"), guard.PASS)
+        self.assertEqual(self.bash("cat ~/.claude/agents/a.md &>/dev/null"), guard.PASS)
+
+    def test_real_redirects_still_denied(self):
+        for command in ("cat x 2>/dev/null > ~/.claude/skills/a/SKILL.md", "echo {} >> ~/.claude/settings.json",
+                        "cat x > ~/.claude/agents/a.md 2>&1", "echo x > /dev/nullx ~/.claude/skills/a"):
+            with self.subTest(command=command):
+                self.assertEqual(self.bash(command), guard.DENY)
+
+
 class NormalSelfProtectTest(GuardBase):
 
     def test_bash_cannot_touch_self_or_state(self):

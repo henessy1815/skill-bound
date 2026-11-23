@@ -120,6 +120,8 @@ SessionStart:
   - 현재 폴더(cwd)가 `.claude` 안이면 파일을 바꾸는 명령을 막는다(cd로 옮긴 뒤 상대 경로를 쓰는 우회 대비).
   - 경로를 찾기 전에 따옴표와 역슬래시를 지우고, `$HOME`, `${HOME}`, `~` 를 홈 경로로 바꾸고, 소문자로 바꾼다(맥은 대소문자를 구분하지 않는다).
 - 평소 모드 Write, Edit: skill-bound 폴더, 상태 폴더는 막음. `.claude/skills|agents|commands|plugins`, `.mcp.json` 은 막고 점검으로 안내. `.claude/hooks`, `~/.claude.json` 은 막음. `.claude/settings.json`, `settings.local.json` 은 사람에게 물음(ask). 이 물음은 6-1절 계획에 없던 두 번째 알림이다. 훅 등록을 지울 수 있는 파일이라 사람이 보게 했다.
+- 설정 파일(.claude/settings*.json) 수정 중 skill-bound 훅(`skill-bound/hooks/guard.py` 가 든 줄)을 지우거나 `disableAllHooks` 를 넣는 것은 ask가 아니라 deny하고 switch.py로 안내한다. 통합 시험 5에서 "꺼 줘" 라는 말에 Claude가 switch.py 대신 설정 파일을 덮어써 훅을 지우려 했고, 그 허락 창에는 "이번 세션 동안 계속 허락" 버튼도 있었다. 끄는 길은 switch.py 하나로 모은다.
+- `2>/dev/null`, `>/dev/null`, `&>/dev/null`, `2>&1` 은 파일 쓰기로 보지 않는다. 통합 시험 5에서 설정을 읽기만 하는 명령이 이것 때문에 "설치는 점검을 거쳐야 합니다"로 막혔다.
 - 원칙: 막는 판단은 느슨하게(대소문자 무시, 넓게), 허용하는 판단은 엄격하게(글자 그대로).
 - 입력이 깨져 세션을 알 수 없을 때: 점검 중인 세션이 하나도 없으면 통과, 하나라도 있으면 막는다.
 - SessionStart: 사용자와 현재 프로젝트의 skills, agents, commands 폴더 전체, 플러그인 목록 파일과 plugins/cache, settings 파일의 보안 관련 칸(hooks, enabledPlugins, mcpServers, permissions 등)만, `~/.claude.json` 의 mcpServers, 프로젝트 `.mcp.json` 을 해시한다. 기준선은 프로젝트마다 `skill-bound-state/baselines/` 에 둔다. 처음엔 조용히 기준선만 만들고, 바뀌면 한 번 알린 뒤 기준선을 새로 저장한다. 알림 속 이름은 안전한 문자일 때만 그대로 쓴다. 이 맥에서 항목 498개, 79ms.
@@ -387,7 +389,20 @@ PreToolUse 전용: `tool_name`, `tool_input`, `tool_use_id`.
 - 세션 시작 알림의 `additionalContext` 는 Claude에게 전달된다(Claude가 답에서 그 내용을 언급했다). 바뀐 것이 없으면 두 번 연속 아무 알림도 없었다.
 - 찾아서 고친 거짓 알림: 플러그인 캐시 안의 `.in_use/<프로세스 번호>` 파일은 Claude가 켜지고 꺼질 때마다 생기고 사라진다. 그래서 세션마다 "pm-skills가 바뀌었다"는 거짓 알림이 떴다. `.in_use` 폴더를 비교에서 뺐다(테스트 추가).
 
-### 10-9. 아직 확인하지 않은 것 (B단계, 사람이 직접)
+### 10-9. 통합 시험 B단계 결과 (2026-11-23, 시험용 폴더 `~/skill-bound-test` 에서 사람이 직접)
+
+- 사용자 settings.json은 건드리지 않고, 시험 폴더의 `.claude/settings.local.json` 에만 훅을 등록했다(그 폴더에서 연 Claude에만 작동).
+- 시험 1 설치 명령: Claude가 설치 명령 대신 바로 skill-bound 점검으로 갔다. 없는 저장소를 받다가 맥 키체인 암호 창이 뜬 문제를 찾아 고쳤다(git 설정 파일을 읽지 않음).
+- 시험 2 악성 점검: 🔴 카드와 선택 버튼, 설치 안 함, 정리까지 성공. 카드 표시는 네 번 만에 "질문 글에 넣고 훅이 검사" 방식으로 성공(6-2-2절).
+- 시험 3 정상 설치: 🟢 카드, 설치 선택 뒤 **자동 모드에서도 노란 허락 창이 뜸**, 허락하니 해시 확인 뒤 `~/.claude/skills/good-csv-summary` 에 설치(실행 권한 없음, 원본과 같음, 기준선 등록).
+- 시험 4 세션 시작 알림: 화면에 "SessionStart:startup says: ..." 로 보임. 몰래 만든 `rogue-test` 는 잡고, 점검을 거친 `good-csv-summary` 는 알리지 않음. 다시 켜면 조용함.
+- 시험 5 끄기: Claude가 처음엔 설정 파일을 덮어써 끄려 했고 허락 창에서 거절됨(그 길은 이제 deny). 두 번째엔 switch.py off로 노란 허락 창, 허락하니 꺼짐. 켜기는 허락 창 없이 됨.
+
+### 10-10. 아직 확인하지 않은 것
+
+- 사용자 settings.json(컴퓨터 전체)에 등록했을 때. 시험은 프로젝트 설정으로만 했다.
+
+### 10-11. (옛 기록) 시험 전에 적어 둔 확인 항목
 
 - 진짜 `~/.claude/settings.json` 에 등록한 훅이 대화형 `claude` 에서 같은 방식으로 동작하는지.
 - install_checked.py의 허락 창이 사람에게 보이고, 허락하면 실제로 설치되는지.

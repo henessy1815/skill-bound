@@ -1,6 +1,6 @@
 ---
 name: skill-bound
-description: 남의 Claude 스킬을 설치하기 전에, 아무것도 실행하지 않고 격리 폴더에 받아 점검하고 신호등 보고서를 보여 준 뒤 사람이 설치 여부를 고르게 한다. 사용자가 스킬, 플러그인, MCP를 설치하려 할 때, `/skill-bound <주소>` 로 부를 때, 또는 skill-bound 훅이 설치 명령을 막았을 때 쓴다.
+description: 남의 Claude 스킬을 설치하기 전에, 아무것도 실행하지 않고 격리 폴더에 받아 점검하고 신호등 보고서를 보여 준 뒤 사람이 설치 여부를 고르게 한다. 사용자가 스킬, 플러그인, MCP를 설치하려 할 때, `/skill-bound <주소>` 로 부를 때, skill-bound 훅이 설치 명령을 막았을 때, 그리고 사용자가 skill-bound를 끄거나, 다시 켜거나, 지워 달라고 할 때 쓴다.
 argument-hint: <github.com/아이디/저장소 또는 로컬 폴더 절대 경로>
 ---
 

@@ -97,6 +97,7 @@ MESSAGES = {
     "VET_TOOL": "skill-bound 점검 중에는 이 도구를 쓸 수 없습니다.",
     "VET_BROKEN": "skill-bound: 점검 상태 파일을 읽을 수 없어 점검 모드로 막고 있습니다. `vet.py end` 로 점검을 끝내세요.",
     "GUARD_ERROR": "skill-bound: 훅이 판단하지 못해 안전을 위해 막았습니다.",
+    "HOOK_REMOVAL": "skill-bound: 설정 파일에서 skill-bound 훅을 지우거나 모든 훅을 끄는 수정은 막혀 있습니다. 끄려면 `/usr/bin/python3 -I -B <skill-bound 폴더>/scripts/switch.py off`, 완전히 지우려면 `switch.py uninstall` 을 실행하세요(사람의 허락을 받습니다).",
     "CARD_MISSING": "skill-bound: 선택 버튼의 질문 글에 점검 카드가 없습니다. 질문 글 맨 위에 아래 카드를 줄바꿈까지 그대로, 한 글자도 바꾸지 말고 넣은 뒤 빈 줄 하나, 그다음 \"이 스킬을 설치할까요?\" 를 적어 다시 띄우세요. 카드는 사용자가 판정을 직접 보기 위한 것입니다.",
 }
 
@@ -402,10 +403,52 @@ WRITE_PROGRAM_RE = re.compile(
 )
 
 
+# 출력을 버리거나 합치는 것은 파일 쓰기가 아니다: 2>/dev/null, >/dev/null, &>/dev/null, 2>&1
+HARMLESS_REDIRECT_RE = re.compile(r"(\d*|&)>>?\s*/dev/null\b|\d*>&\d")
+
+
 def writes_something(command, norm):
     # type: (str, str) -> bool
-    """파일을 만들거나 바꿀 수 있는 명령이 섞여 있는지. 넓게 잡는다(막는 쪽 판단이므로)."""
-    return ">" in command or bool(WRITE_PROGRAM_RE.search(norm))
+    """파일을 만들거나 바꿀 수 있는 명령이 섞여 있는지. 넓게 잡는다(막는 쪽 판단이므로).
+
+    통합 시험에서, 설정 파일을 읽기만 하는 명령이 `2>/dev/null` 의 `>` 때문에 막혔다.
+    /dev/null로 버리는 것은 쓰기가 아니므로 빼고 본다.
+    """
+    return ">" in HARMLESS_REDIRECT_RE.sub(" ", command) or bool(WRITE_PROGRAM_RE.search(norm))
+
+
+GUARD_MARK = "skill-bound/hooks/guard.py"
+
+
+def removes_our_hook(tool_name, tool_input, target):
+    # type: (str, Dict[str, object], str) -> bool
+    """설정 파일 수정이 skill-bound 훅을 지우거나 모든 훅을 끄는지.
+
+    통합 시험에서 "꺼 줘" 라는 말에 Claude가 switch.py 대신 설정 파일을 덮어써 훅을 지우려 했다.
+    사람의 허락 창이 막았지만 "이번 세션 동안 계속 허락" 버튼도 있었다. 끄는 길은 switch.py 하나로
+    모은다. 그 밖의 설정 수정은 지금처럼 사람에게 묻는다.
+    """
+    try:
+        with open(target, encoding="utf-8") as handle:
+            current = handle.read()
+    except (OSError, ValueError):
+        current = ""
+    ours_now = GUARD_MARK in current
+    pieces = []  # type: List[Tuple[str, str]]
+    if tool_name == "Write":
+        pieces.append((current, str(tool_input.get("content", ""))))
+    elif tool_name == "Edit":
+        pieces.append((str(tool_input.get("old_string", "")), str(tool_input.get("new_string", ""))))
+    elif tool_name == "MultiEdit" and isinstance(tool_input.get("edits"), list):
+        for edit in tool_input["edits"]:  # type: ignore
+            if isinstance(edit, dict):
+                pieces.append((str(edit.get("old_string", "")), str(edit.get("new_string", ""))))
+    for old, new in pieces:
+        if "disableallhooks" in new.lower() and "disableallhooks" not in old.lower():
+            return True
+        if ours_now and old.count(GUARD_MARK) > new.count(GUARD_MARK):
+            return True
+    return False
 
 
 def _cwd_in_claude_dir(cwd):
@@ -476,6 +519,8 @@ def decide_normal(tool_name, tool_input, cwd, ctx):
             return DENY, "PROTECTED"
         code = classify_config_path(target)
         if code == "SETTINGS_ASK":
+            if removes_our_hook(tool_name, tool_input, target):
+                return DENY, "HOOK_REMOVAL"
             return ASK, code
         if code is not None:
             return DENY, code
