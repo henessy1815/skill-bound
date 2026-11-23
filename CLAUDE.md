@@ -198,7 +198,11 @@ claude -p --restricted --tools=Read,Grep,Glob --disallowedTools=mcp__* \
 - 카드의 발견은 정적 스캔과 읽기실을 합쳐, 같은 파일:줄은 한 번만, 빨강이 먼저. 읽기실 분류 중 EXFIL, REMOTE_EXEC, PERSISTENCE, CREDENTIAL, HIDDEN_INSTRUCTION, DESTRUCTIVE는 빨강, 나머지는 노랑으로 표시.
 - 카드에도 고정 문장, 검사한 경로, 줄 번호만 들어간다(테스트로 확인).
 - SKILL.md 4단계: 카드만 코드 블록으로 그대로 보여 주고, 판정 뜻은 한두 문장, 그다음 AskUserQuestion으로 버튼. 빨강과 판단 불가는 "설치 안 함 (추천)"이 첫 번째. "보고서 원문 보기"를 고르면 이미 받은 원문을 보여 주고 다시 묻는다(reader.py를 다시 돌리지 않는다).
-- 카드 표시 방식 변경(통합 시험에서 발견): Claude에게 "카드를 답변에 옮겨 적어라"고 해도 건너뛰어, 버튼만 뜨고 카드가 안 보였다(명령 출력은 화면에서 접혀 보이지 않는다). 그래서 reader.py가 카드를 `skill-bound-state/reports/<격리 폴더 이름>.json` 에 저장하고, guard.py가 점검 모드에서 AskUserQuestion이 불리기 직전에 그 카드를 `systemMessage` 로 화면에 직접 보여 준다. Claude를 거치지 않으니 속은 Claude가 카드 내용을 바꿔 말할 수도 없다. vet.py end가 카드 파일도 지운다.
+- 카드 표시 방식(통합 시험에서 세 번 바꿈):
+  1. Claude에게 "카드를 답변에 옮겨 적어라" → 지시를 건너뛰어 카드가 안 보였다. 명령 출력은 화면에서 접혀 보이지 않는다.
+  2. 훅이 AskUserQuestion 직전에 `systemMessage` 로 보여 주기 → 화면에 나타나지 않았다. 문서에도 훅이 화면에 직접 글을 띄우는 방법은 없다.
+  3. 훅이 `updatedInput` + `allow` 로 질문 글에 카드를 붙이기 → **선택 창 자체가 뜨지 않았다.** AskUserQuestion에 allow와 updatedInput을 주면 "훅이 대신 답한다"로 처리된다. 되돌렸다.
+  4. 지금: reader.py가 카드를 `skill-bound-state/reports/<격리 폴더 이름>.json` 에 저장하고, SKILL.md는 Claude에게 카드를 AskUserQuestion의 `question` 맨 위에 넣게 한다. guard.py는 점검 모드에서 질문 글에 카드가 그대로 없으면(빈칸 차이만 봐줌) 막고, 막은 이유에 넣어야 할 카드를 붙여 준다. 사용자가 확실히 보는 곳은 Claude의 답변 글과 선택 창의 질문 글뿐이다.
 - vet.py는 받은 직후 `.DS_Store` 를 지운다. 맥이 저절로 만드는 파일이 매번 "바이너리" 노랑으로 잡혔다(통합 시험에서 발견).
 
 ### 6-3. 판정 기준

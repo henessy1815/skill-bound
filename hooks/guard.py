@@ -97,6 +97,7 @@ MESSAGES = {
     "VET_TOOL": "skill-bound 점검 중에는 이 도구를 쓸 수 없습니다.",
     "VET_BROKEN": "skill-bound: 점검 상태 파일을 읽을 수 없어 점검 모드로 막고 있습니다. `vet.py end` 로 점검을 끝내세요.",
     "GUARD_ERROR": "skill-bound: 훅이 판단하지 못해 안전을 위해 막았습니다.",
+    "CARD_MISSING": "skill-bound: 선택 버튼의 질문 글에 점검 카드가 없습니다. 질문 글 맨 위에 아래 카드를 줄바꿈까지 그대로, 한 글자도 바꾸지 말고 넣은 뒤 빈 줄 하나, 그다음 \"이 스킬을 설치할까요?\" 를 적어 다시 띄우세요. 카드는 사용자가 판정을 직접 보기 위한 것입니다.",
 }
 
 
@@ -522,9 +523,33 @@ def decide_vet(tool_name, tool_input, cwd, ctx, quarantine):
             return DENY, "VET_WRITE"
         return PASS, "OK"
 
+    if tool_name == "AskUserQuestion":
+        # 점검 결과 카드가 있으면, 선택 버튼의 질문 글에 그 카드가 그대로 들어 있어야 띄울 수 있다.
+        # 훅은 화면에 직접 글을 띄울 수 없어서(통합 시험에서 확인), Claude가 질문 글에 넣고 훅이 검사한다.
+        card = load_card(ctx.state_dir, quarantine)
+        if card and not question_has_card(tool_input, card):
+            return DENY, "CARD_MISSING"
+        return PASS, "OK"
     if tool_name in VET_HARMLESS_TOOLS:
         return PASS, "OK"
     return DENY, "VET_TOOL"
+
+
+def _squash(text):
+    # type: (str) -> str
+    return " ".join(text.split())
+
+
+def question_has_card(tool_input, card):
+    # type: (object, str) -> bool
+    """질문 글 중 하나에 카드가 들어 있는지. 빈칸과 줄바꿈의 차이는 봐주고, 글자는 그대로여야 한다."""
+    if not isinstance(tool_input, dict) or not isinstance(tool_input.get("questions"), list):
+        return False
+    want = _squash(card)
+    for item in tool_input["questions"]:
+        if isinstance(item, dict) and isinstance(item.get("question"), str) and want in _squash(item["question"]):
+            return True
+    return False
 
 
 def decide(event, ctx):
@@ -550,15 +575,19 @@ def decide(event, ctx):
     return decide_vet(tool_name, tool_input, cwd, ctx, quarantine)
 
 
-def hook_output(action, code):
-    # type: (str, str) -> Optional[Dict[str, object]]
+def hook_output(action, code, extra=None):
+    # type: (str, str, Optional[str]) -> Optional[Dict[str, object]]
+    """extra는 이유 문장 뒤에 붙이는 글(점검 카드). 카드는 skill-bound가 만든 고정 문장과 경로뿐이다."""
     if action == PASS:
         return None
+    reason = MESSAGES.get(code, MESSAGES["GUARD_ERROR"])
+    if extra:
+        reason = reason + "\n\n" + extra
     return {
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "deny" if action == DENY else "ask",
-            "permissionDecisionReason": MESSAGES.get(code, MESSAGES["GUARD_ERROR"]),
+            "permissionDecisionReason": reason,
         }
     }
 
@@ -783,37 +812,12 @@ def _read_event():
     return data
 
 
-def card_message(event, ctx):
-    # type: (Dict[str, object], Ctx) -> Optional[str]
-    """점검 모드에서 Claude가 선택 버튼(AskUserQuestion)을 띄우기 직전이면, 요약 카드를 돌려준다.
-
-    통합 시험에서 Claude가 "카드를 답변에 옮겨 적어라"는 지시를 건너뛰어, 버튼만 뜨고 카드가
-    보이지 않았다. 그래서 카드는 Claude를 거치지 않고 훅이 화면에 직접 보여 준다. 속은 Claude가
-    카드 내용을 바꿔 말할 수도 없게 된다.
-    """
-    if event.get("tool_name") != "AskUserQuestion":
-        return None
-    mode, quarantine = get_mode(ctx, event.get("session_id"))
-    if mode != "vet" or quarantine is None:
-        return None
-    card = load_card(ctx.state_dir, quarantine)
-    return "skill-bound 점검 결과\n\n" + card if card else None
-
-
 def main_pre(ctx):
     # type: (Ctx) -> int
     event = None  # type: Optional[Dict[str, object]]
     try:
         event = _read_event()
         action, code = decide(event, ctx)
-        if action == PASS:
-            try:
-                message = card_message(event, ctx)
-            except Exception:
-                message = None
-            if message:
-                print(json.dumps({"systemMessage": message}, ensure_ascii=False))
-                return 0
     except Exception:
         # 상태를 알 수 있으면 평소 모드는 통과, 그 밖에는 막는다.
         action, code = DENY, "GUARD_ERROR"
@@ -828,7 +832,13 @@ def main_pre(ctx):
                 action, code = PASS, "OK"
         except Exception:
             pass
-    out = hook_output(action, code)
+    extra = None
+    if code == "CARD_MISSING":
+        try:
+            extra = load_card(ctx.state_dir, str(get_mode(ctx, event.get("session_id"))[1]))  # type: ignore
+        except Exception:
+            extra = None
+    out = hook_output(action, code, extra)
     if out is not None:
         print(json.dumps(out, ensure_ascii=False))
     return 0

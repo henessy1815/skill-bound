@@ -331,34 +331,54 @@ class VetModeTest(GuardBase):
         self.assertEqual(guard.get_mode(self.ctx, "s1")[0], "normal")
 
 
-class CardDisplayTest(GuardBase):
-    """버튼(AskUserQuestion)이 뜨기 직전에 훅이 요약 카드를 화면에 직접 보여 준다."""
+class CardInQuestionTest(GuardBase):
+    """선택 버튼의 질문 글에 점검 카드가 그대로 들어 있어야 버튼을 띄울 수 있다."""
 
-    def event(self, tool="AskUserQuestion", session="s1"):
-        return {"session_id": session, "tool_name": tool, "tool_input": {}, "cwd": self.project}
+    CARD = "\u2713 격리 폴더에서 점검했습니다\n\n\U0001F534 설치 비권장\n\n  \U0001F534 a.py:1   SSH 키에 접근합니다."
 
-    def test_card_shown_before_buttons_in_vet_mode(self):
+    def ask(self, question):
+        return {"questions": [{"question": question, "header": "설치", "multiSelect": False,
+                               "options": [{"label": "설치 안 함 (추천)", "description": "d"}]}]}
+
+    def setUp(self):
+        GuardBase.setUp(self)
         self.start_vet()
-        guard.save_card(self.state, self.quarantine, "\U0001F534 설치 비권장\n  a.py:1   x")
-        message = guard.card_message(self.event(), self.ctx)
-        self.assertIn("\U0001F534 설치 비권장", message)
-        self.assertTrue(message.startswith("skill-bound 점검 결과"))
+        guard.save_card(self.state, self.quarantine, self.CARD)
 
-    def test_no_card_outside_vet_or_other_tools(self):
-        guard.save_card(self.state, self.quarantine, "card")
-        self.assertIsNone(guard.card_message(self.event(), self.ctx))  # 평소 모드
-        self.start_vet()
-        self.assertIsNone(guard.card_message(self.event(tool="Bash"), self.ctx))
-        self.assertIsNone(guard.card_message(self.event(session="other"), self.ctx))
+    def test_without_card_denied(self):
+        self.assertEqual(self.decide("AskUserQuestion", self.ask("이 스킬을 설치할까요?")), (guard.DENY, "CARD_MISSING"))
 
-    def test_no_card_file(self):
-        self.start_vet()
-        self.assertIsNone(guard.card_message(self.event(), self.ctx))
+    def test_with_card_passes(self):
+        q = self.CARD + "\n\n이 스킬을 설치할까요?"
+        self.assertEqual(self.decide("AskUserQuestion", self.ask(q)), (guard.PASS, "OK"))
 
-    def test_main_prints_system_message(self):
-        self.start_vet()
-        guard.save_card(self.state, self.quarantine, "CARD-TEXT")
-        stdin = io.TextIOWrapper(io.BytesIO(json.dumps(self.event()).encode()))
+    def test_spacing_differences_allowed(self):
+        q = " ".join(self.CARD.split()) + " 이 스킬을 설치할까요?"
+        self.assertEqual(self.action("AskUserQuestion", self.ask(q)), guard.PASS)
+
+    def test_changed_word_denied(self):
+        q = self.CARD.replace("설치 비권장", "통과") + "\n\n이 스킬을 설치할까요?"
+        self.assertEqual(self.action("AskUserQuestion", self.ask(q)), guard.DENY)
+
+    def test_shortened_card_denied(self):
+        q = self.CARD.split("\n\n")[1] + "\n\n이 스킬을 설치할까요?"
+        self.assertEqual(self.action("AskUserQuestion", self.ask(q)), guard.DENY)
+
+    def test_bad_input_denied(self):
+        self.assertEqual(self.action("AskUserQuestion", {"questions": "x"}), guard.DENY)
+
+    def test_no_card_file_passes(self):
+        guard.remove_card(self.state, self.quarantine)
+        self.assertEqual(self.action("AskUserQuestion", self.ask("다른 질문")), guard.PASS)
+
+    def test_normal_mode_not_checked(self):
+        guard.clear_session_state(self.state, "s1")
+        self.assertEqual(self.action("AskUserQuestion", self.ask("아무 질문")), guard.PASS)
+
+    def test_deny_reason_carries_card(self):
+        event = {"session_id": "s1", "tool_name": "AskUserQuestion", "tool_input": self.ask("이 스킬을 설치할까요?"),
+                 "cwd": self.project}
+        stdin = io.TextIOWrapper(io.BytesIO(json.dumps(event).encode()))
         out = io.StringIO()
         old = sys.stdin
         sys.stdin = stdin
@@ -367,12 +387,12 @@ class CardDisplayTest(GuardBase):
                 guard.main_pre(self.ctx)
         finally:
             sys.stdin = old
-        data = json.loads(out.getvalue())
-        self.assertIn("CARD-TEXT", data["systemMessage"])
-        self.assertNotIn("hookSpecificOutput", data)  # 허락, 거절 판단은 하지 않는다(그대로 통과)
+        data = json.loads(out.getvalue())["hookSpecificOutput"]
+        self.assertEqual(data["permissionDecision"], "deny")
+        self.assertIn(self.CARD, data["permissionDecisionReason"])
+        self.assertTrue(data["permissionDecisionReason"].startswith(guard.MESSAGES["CARD_MISSING"]))
 
     def test_remove_card(self):
-        guard.save_card(self.state, self.quarantine, "x")
         guard.remove_card(self.state, self.quarantine)
         self.assertIsNone(guard.load_card(self.state, self.quarantine))
 
