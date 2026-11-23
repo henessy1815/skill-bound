@@ -39,19 +39,25 @@
 
 ## 설치
 
-### 1. 파일 복사
+### 1. 받아서 복사
 
-skill-bound 폴더를 `~/.claude/skills/skill-bound` 에 **복사**합니다. 테스트용 악성 샘플(`tests/`)과 개발용 메모(`CLAUDE.md`)는 빼고 복사합니다.
+먼저 저장소를 아무 곳에나 받습니다(아래는 홈 폴더의 `skill-bound-src`).
+
+```bash
+git clone https://github.com/henessy1815/skill-bound.git ~/skill-bound-src
+```
+
+받은 폴더를 `~/.claude/skills/skill-bound` 에 **복사**합니다. 테스트용 악성 샘플(`tests/`)과 개발용 메모(`CLAUDE.md`)는 빼고 복사합니다.
 
 ```bash
 mkdir -p ~/.claude/skills
 ```
 
 ```bash
-rsync -a --exclude tests --exclude .git --exclude CLAUDE.md /path/to/skill-bound/ ~/.claude/skills/skill-bound/
+rsync -a --exclude tests --exclude .git --exclude CLAUDE.md ~/skill-bound-src/ ~/.claude/skills/skill-bound/
 ```
 
-`/path/to/skill-bound` 는 이 폴더가 있는 곳으로 바꿉니다.
+복사가 끝나면 `~/skill-bound-src` 는 지워도 됩니다(나중에 업데이트할 때 다시 받으면 됩니다).
 
 주의할 점:
 - **심볼릭 링크로 연결하지 말고 복사하세요.** 훅은 skill-bound 스크립트의 실제 경로를 글자 그대로 비교하기 때문에, 링크로 연결하면 스크립트 실행이 막힙니다.
@@ -193,7 +199,37 @@ rm ~/.claude/skill-bound-state/OFF
 
 ## skill-bound로 skill-bound를 점검하면
 
-정적 스캔은 **빨강**이 나옵니다. 위험 패턴을 찾는 규칙 안에 `LaunchAgents`, `.ssh`, `curl ... | sh` 같은 단어가 들어 있기 때문입니다. 또 `tests/samples/` 에는 일부러 만든 악성 샘플이 들어 있습니다(설치할 때는 빼고 복사합니다). 판정 결과를 숨기지 않고 그대로 공개합니다.
+점검 도구가 자기 자신을 점검한 결과를 숨기지 않고 그대로 공개합니다. 대상은 실제로 설치되는 파일 9개입니다(`tests/`, `CLAUDE.md` 제외). 2026-11-23, 읽기실 모델은 sonnet. 줄 번호는 점검 당시 기준이라 이후 수정으로 조금 달라질 수 있습니다.
+
+**최종 판정: 빨강.** 정적 스캔이 빨강, 읽기실이 노랑이고, 둘 중 더 나쁜 쪽을 따릅니다.
+
+**정적 스캔: 빨강, 발견 80건**
+
+| 파일 | 빨강 | 노랑 |
+|---|---|---|
+| `scripts/scan.py` | 26 | 14 |
+| `README.md` | 9 | 7 |
+| `hooks/guard.py` | 6 | 6 |
+| `scripts/reader.py` | 2 | 2 |
+| `scripts/vet.py` | 1 | 2 |
+| `scripts/switch.py` | 1 | 1 |
+| `SKILL.md` | 0 | 2 |
+| `scripts/install_checked.py` | 0 | 1 |
+
+빨강이 나오는 이유: 위험 패턴을 찾는 규칙과 설명 안에 `LaunchAgents`, `.ssh`, `curl ... | sh`, "이전 지시를 무시" 같은 말이 그대로 들어 있기 때문입니다. 정적 스캔은 글자 패턴만 보므로, 이것이 "찾으려는 말"인지 "실제로 하는 일"인지 구별하지 못합니다. 그래서 일부러 넓게 잡고, 판단은 읽기실과 사람에게 맡깁니다.
+
+**밀폐 읽기실: 노랑, 9개 파일 모두 끝까지 읽음, 발견 4건**
+
+| 분류 | 위치 | 실제 내용 |
+|---|---|---|
+| PERSISTENCE (자동 실행 등록) | `README.md` "훅 등록" 절 | settings.json에 훅을 등록하라는 설치 안내 |
+| PERMISSION (과한 권한) | `README.md` "훅 등록" 절 | 모든 도구 호출을 훅이 먼저 보는 설정(`matcher: "*"`) |
+| REMOTE_CONTENT (원격에서 받아옴) | `scripts/vet.py:258` | 점검할 스킬을 `git clone` 으로 받는 부분 |
+| DESTRUCTIVE (파괴적 동작) | `scripts/switch.py:149` | `uninstall` 이 상태 폴더(`~/.claude/skill-bound-state`)를 지우는 부분 |
+
+네 가지 모두 skill-bound가 하는 일 그 자체입니다. 읽기실은 "주의할 점이 있지만 기능상 이유가 설명됨"인 노랑으로 판단했고, 이것이 맞는 판정이라고 봅니다.
+
+또 `tests/samples/` 에는 일부러 만든 악성 샘플이 들어 있어 점검하면 당연히 빨강입니다. 설치할 때는 빼고 복사합니다.
 
 ## 테스트
 
@@ -204,3 +240,7 @@ rm ~/.claude/skill-bound-state/OFF
 ```
 
 테스트는 진짜 Claude를 부르지 않고, 진짜 홈 폴더도 건드리지 않습니다(가짜 홈, 가짜 claude, 로컬 git 저장소를 씁니다).
+
+## 라이선스
+
+MIT. `LICENSE` 파일을 보세요.

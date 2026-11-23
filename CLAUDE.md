@@ -316,7 +316,7 @@ claude -p --restricted --tools=Read,Grep,Glob --disallowedTools=mcp__* \
 
 ### 10-3. 자식 프로세스와 훅 (실험)
 
-- `--restricted` 없이는 사용자 settings의 훅이 자식에서도 돈다. 이 맥에는 다른 앱(Orca)의 훅이 거의 모든 이벤트에 걸려 있고, 그것도 자식에서 돌았다.
+- `--restricted` 없이는 사용자 settings의 훅이 자식에서도 돈다. 이 맥에는 다른 앱의 훅이 거의 모든 이벤트에 걸려 있고, 그것도 자식에서 돌았다.
 - `--restricted` 를 켜면 사용자 settings 훅은 돌지 않고 `--settings` 로 준 훅만 돈다.
 - `-p` 모드는 폴더 신뢰 확인창을 건너뛴다. 그래서 `--restricted` 없이 격리 폴더에서 실행하면 그 안의 `.claude/settings.json` 훅이 실제로 실행됐다.
 
