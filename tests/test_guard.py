@@ -355,8 +355,10 @@ class CardDisplayTest(GuardBase):
         self.start_vet()
         self.assertIsNone(guard.card_message(self.event(), self.ctx))
 
-    def run_main_with(self, event):
-        stdin = io.TextIOWrapper(io.BytesIO(json.dumps(event).encode()))
+    def test_main_prints_system_message(self):
+        self.start_vet()
+        guard.save_card(self.state, self.quarantine, "CARD-TEXT")
+        stdin = io.TextIOWrapper(io.BytesIO(json.dumps(self.event()).encode()))
         out = io.StringIO()
         old = sys.stdin
         sys.stdin = stdin
@@ -365,43 +367,9 @@ class CardDisplayTest(GuardBase):
                 guard.main_pre(self.ctx)
         finally:
             sys.stdin = old
-        text = out.getvalue().strip()
-        return json.loads(text) if text else None
-
-    def ask_event(self, question="이 스킬을 설치할까요?"):
-        event = self.event()
-        event["tool_input"] = {"questions": [{"question": question, "header": "설치", "multiSelect": False,
-                                              "options": [{"label": "설치 안 함 (추천)", "description": "d"},
-                                                          {"label": "그래도 설치", "description": "d"}]}]}
-        return event
-
-    def test_card_put_on_top_of_question(self):
-        self.start_vet()
-        guard.save_card(self.state, self.quarantine, "CARD-TEXT")
-        out = self.run_main_with(self.ask_event())["hookSpecificOutput"]
-        self.assertEqual(out["permissionDecision"], "allow")
-        q = out["updatedInput"]["questions"][0]
-        self.assertTrue(q["question"].startswith(guard.CARD_TITLE))
-        self.assertIn("CARD-TEXT", q["question"])
-        self.assertTrue(q["question"].endswith("이 스킬을 설치할까요?"))
-        self.assertEqual(q["options"][0]["label"], "설치 안 함 (추천)")  # 선택지는 그대로
-        self.assertEqual(q["header"], "설치")
-
-    def test_card_not_added_twice(self):
-        self.start_vet()
-        guard.save_card(self.state, self.quarantine, "CARD-TEXT")
-        self.assertIsNone(self.run_main_with(self.ask_event(guard.CARD_TITLE + "\n\nCARD-TEXT\n\nq")))
-
-    def test_odd_input_left_alone(self):
-        self.start_vet()
-        guard.save_card(self.state, self.quarantine, "CARD-TEXT")
-        event = self.event()
-        event["tool_input"] = {"questions": "not a list"}
-        self.assertIsNone(self.run_main_with(event))
-
-    def test_normal_mode_question_untouched(self):
-        guard.save_card(self.state, self.quarantine, "CARD-TEXT")
-        self.assertIsNone(self.run_main_with(self.ask_event()))
+        data = json.loads(out.getvalue())
+        self.assertIn("CARD-TEXT", data["systemMessage"])
+        self.assertNotIn("hookSpecificOutput", data)  # 허락, 거절 판단은 하지 않는다(그대로 통과)
 
     def test_remove_card(self):
         guard.save_card(self.state, self.quarantine, "x")
