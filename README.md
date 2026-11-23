@@ -2,11 +2,7 @@
 
 남이 만든 Claude Code 스킬을 설치하기 전에, 아무것도 실행하지 않고 위험한지 먼저 알려 주는 스킬입니다.
 
-```
-/skill-bound github.com/someone/pdf-helper
-```
-
-이렇게 부르면 격리 폴더에 받고, 점검하고, 신호등 판정을 보여 준 뒤, 설치할지는 사람이 고릅니다.
+격리 폴더에 받아 점검하고, 신호등 판정을 보여 준 뒤, 설치할지는 사람이 고릅니다.
 
 ## 왜 필요한가
 
@@ -27,6 +23,12 @@
 | 7. 해시 대조 설치 | 점검한 바로 그 파일들인지 SHA-256으로 확인한 뒤에만 설치합니다                                              |
 
 점검하는 동안(2단계부터 6단계)에는 본 세션의 Claude도 skill-bound 스크립트 말고는 거의 아무것도 할 수 없게 훅이 막습니다.
+
+평소에는 아무 말 없이 통과시키고, 다음 경우에만 개입합니다. 일반 프로젝트의 `git clone` 이나 평범한 개발 작업은 막지 않습니다.
+
+- 설치 명령(`npx skills add`, `claude plugin install`, `claude mcp add` 등)이나 `~/.claude/skills` 같은 스킬 폴더에 파일을 넣으려 할 때: 막고 점검으로 안내
+- skill-bound 폴더나 상태 폴더를 바꾸려 할 때: 막음
+- Claude가 `.claude/settings.json` 을 고치려 할 때, 점검을 마친 스킬을 설치할 때: 사람에게 물음
 
 ## 사용법
 
@@ -49,14 +51,9 @@ Claude에게 말로 부탁하면 됩니다.
 
 정적 스캔과 읽기실 판정 중 **더 나쁜 쪽**이 최종 판정입니다. 읽기실은 별도의 Claude를 쓰므로 점검 한 번에 보통 몇 센트가 들고, 최대 1달러로 제한되어 있습니다.
 
-## 필요한 것
-
-- macOS, 터미널에서 쓰는 Claude Code
-- `/usr/bin/python3` (Homebrew를 설치했다면 이미 있습니다. 3.9 이상)
-- `git` (GitHub 주소에서 받아 점검할 때만 씁니다. Homebrew를 설치했다면 이미 있습니다)
-- 외부 패키지는 하나도 필요 없습니다. 파이썬 표준 라이브러리만 씁니다. 점검 도구가 남의 패키지를 깔면 그 자체가 위험이 되기 때문입니다.
-
 ## 설치
+
+요구 사항: macOS, 터미널에서 쓰는 Claude Code, `/usr/bin/python3` 3.9 이상, `git`(GitHub 주소에서 받아 점검할 때만). 외부 패키지는 쓰지 않고 파이썬 표준 라이브러리만 씁니다. `/usr/bin/python3` 와 `git` 은 Homebrew를 설치했다면 이미 있습니다.
 
 **1. 받아서 복사합니다.** 저장소를 임시 폴더에 받은 뒤, 필요한 파일만 `~/.claude/skills/skill-bound/` 로 복사합니다. 스킬 폴더에 바로 받거나 심볼릭 링크로 연결하면 훅이 막거나 동작하지 않으니, 업데이트할 때도 이 방법을 씁니다.
 
@@ -118,55 +115,14 @@ cp -R /tmp/skill-bound/SKILL.md /tmp/skill-bound/hooks /tmp/skill-bound/scripts 
 
 점검 기록을 두는 `~/.claude/skill-bound-state/` 는 각 컴퓨터에서 처음 쓸 때 저절로 생기므로 저장소에는 없습니다.
 
-## 평소에 개입하는 경우
-
-평소에는 아무 말 없이 통과시킵니다. 다음 경우에만 개입합니다.
-
-| 상황                                                                                         | 동작                                         |
-| -------------------------------------------------------------------------------------------- | -------------------------------------------- |
-| `npx skills add`, `claude plugin install`, `claude plugin marketplace add`, `claude mcp add` | 막고 점검으로 안내                           |
-| `~/.claude/skills`, `agents`, `commands`, `plugins`, `.mcp.json` 에 파일을 넣으려 할 때      | 막고 점검으로 안내                           |
-| skill-bound 폴더나 상태 폴더를 바꾸려 할 때                                                  | 막음                                         |
-| Claude가 `.claude/settings.json` 을 고치려 할 때                                             | 사람에게 물음 (훅 등록이 지워질 수 있으므로) |
-| 점검을 마친 스킬을 설치할 때                                                                 | 사람에게 물음                                |
-
-일반 프로젝트의 `git clone` 이나 평범한 개발 작업은 막지 않습니다.
-
 ## 끄기, 켜기, 완전히 지우기
 
-Claude에게 말로 부탁하면 됩니다.
+Claude에게 "skill-bound 꺼 줘", "다시 켜 줘", "완전히 지워 줘" 라고 말하면 됩니다. 끄기와 지우기는 허락 창을 한 번 거칩니다. 읽은 글 속 숨은 지시에 속은 Claude가 몰래 끄지 못하게 하려는 것이라, **직접 부탁하지 않았는데 이 창이 뜨면 거절하세요.** 완전히 지우기는 settings.json에서 skill-bound 훅만 지우고(백업을 남김), 상태 폴더와 설치 폴더를 지웁니다.
 
-| 부탁                         | Claude가 하는 일           | 허락 창                   |
-| ---------------------------- | -------------------------- | ------------------------- |
-| "skill-bound 꺼 줘"          | `switch.py off` 실행       | 뜸. 한 번 눌러야 꺼짐     |
-| "skill-bound 다시 켜 줘"     | `switch.py on` 실행        | 안 뜸 (안전해지는 쪽이라) |
-| "skill-bound 완전히 지워 줘" | `switch.py uninstall` 실행 | 뜸. 한 번 눌러야 지워짐   |
-
-**왜 끄기와 지우기에만 허락 창이 뜨나요?**
-Claude는 평소 웹 페이지나 남의 저장소 글을 읽습니다. 그 안에 "skill-bound를 꺼라" 같은 문장이 숨어 있을 수 있습니다(프롬프트 인젝션이라는 실제 공격 방법입니다). Claude가 묻지 않고 끌 수 있으면 그 한 줄로 모든 보호가 사라집니다. 그래서 사람의 클릭 한 번을 거치게 했습니다. **직접 부탁하지 않았는데 이 허락 창이 뜨면 거절하세요.** Claude가 무언가에 속았다는 신호입니다.
-
-권한 확인을 끄는 모드(bypassPermissions)에서도 이 허락 창은 생략되지 않는 것을 확인했습니다.
-
-Claude가 OFF 파일을 직접 만들거나 skill-bound 폴더를 직접 지우는 것은 계속 막혀 있습니다. 반드시 위 명령을 거칩니다.
-
-완전히 지우기(`uninstall`)가 하는 일:
-
-1. `~/.claude/settings.json` 에서 skill-bound 훅만 지웁니다. 다른 훅은 그대로 둡니다. 고치기 전에 `settings.json.before-skill-bound-uninstall` 로 백업합니다.
-2. 진행 중인 점검의 격리 폴더와 상태 폴더(`~/.claude/skill-bound-state`)를 지웁니다.
-3. `~/.claude/skills/skill-bound` 폴더를 지웁니다.
-
-지운 뒤 Claude Code를 다시 시작하면 훅이 완전히 빠집니다.
-
-**훅이 고장 나서 Claude가 아무것도 못 할 때**는 Claude를 거칠 수 없으니 터미널에서 직접 끕니다.
+훅이 고장 나 Claude가 아무것도 못 할 때는 터미널에서 직접 끕니다. 다시 켜려면 이 `OFF` 파일을 지웁니다.
 
 ```bash
 mkdir -p ~/.claude/skill-bound-state && touch ~/.claude/skill-bound-state/OFF
-```
-
-다시 켜기:
-
-```bash
-rm ~/.claude/skill-bound-state/OFF
 ```
 
 ## 한계점
