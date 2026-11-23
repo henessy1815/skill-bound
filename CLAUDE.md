@@ -351,9 +351,23 @@ PreToolUse 전용: `tool_name`, `tool_input`, `tool_use_id`.
 - SessionStart matcher 값: `startup`, `resume`, `clear`, `compact`, `fork`. 입력에 `source` 가 추가된다. 종료 코드 2를 써도 막지는 않는다.
 - 훅에서 쓸 수 있는 환경 변수: `CLAUDE_PROJECT_DIR`, `CLAUDE_PLUGIN_ROOT`, `CLAUDE_PLUGIN_DATA`, `CLAUDE_EFFORT` 등.
 
-### 10-8. 아직 확인하지 않은 것
+### 10-8. 통합 시험 A단계 결과 (2026-11-23, `claude -p` 에 `--settings` 로 진짜 훅을 붙여서)
 
-- 실험은 전부 `-p` 모드에서 했다. 터미널 대화형 `claude` 에서 훅이 같은 방식으로 동작하는지는 11절 7단계 통합 시험에서 다시 본다.
+사용자의 settings.json은 건드리지 않고, 임시 프로젝트의 `.claude/skills/skill-bound` 에 복사본을 두고 시험했다.
+
+- 터미널 `claude` 에서도 Bash 안의 `CLAUDE_CODE_SESSION_ID` 가 세션 id와 같다(데스크톱 앱 전용이 아니다).
+- 스킬이 불리면 기본 폴더(Base directory)를 절대 경로로 알려 주고, `/스킬 주소` 의 주소가 `$ARGUMENTS` 에 그대로 들어간다.
+- 진짜 훅: `git status` 통과, `claude plugin install` 막고 점검 안내, `touch ~/.claude/skill-bound-state/OFF` 막음, `cp ... ~/.claude/skills/...` 막음. 실제로 아무것도 생기지 않았다.
+- 점검 전체 흐름(sonnet): Skill 호출, vet.py start, reader.py, vet.py end 순서로 막힘 없이 진행. 본 세션 Claude가 격리 폴더 파일을 직접 열지 않았다(SKILL.md 규칙을 따름). 악성 샘플은 빨강, 정상 샘플은 초록. 한 번에 약 9센트.
+- 설치 시도: install_checked.py는 ask가 되어, 답할 사람이 없는 `-p` 에서는 자동 거절됐다. 실제로 설치되지 않았고, Claude가 이어서 vet.py end로 정리했다.
+- 세션 시작 알림의 `additionalContext` 는 Claude에게 전달된다(Claude가 답에서 그 내용을 언급했다). 바뀐 것이 없으면 두 번 연속 아무 알림도 없었다.
+- 찾아서 고친 거짓 알림: 플러그인 캐시 안의 `.in_use/<프로세스 번호>` 파일은 Claude가 켜지고 꺼질 때마다 생기고 사라진다. 그래서 세션마다 "pm-skills가 바뀌었다"는 거짓 알림이 떴다. `.in_use` 폴더를 비교에서 뺐다(테스트 추가).
+
+### 10-9. 아직 확인하지 않은 것 (B단계, 사람이 직접)
+
+- 진짜 `~/.claude/settings.json` 에 등록한 훅이 대화형 `claude` 에서 같은 방식으로 동작하는지.
+- install_checked.py의 허락 창이 사람에게 보이고, 허락하면 실제로 설치되는지.
+- 세션 시작 알림의 `systemMessage` 가 사람 눈에 보이는지.
 
 ## 11. 개발 순서
 
@@ -365,10 +379,12 @@ PreToolUse 전용: `tool_name`, `tool_input`, `tool_use_id`.
 6. ~~SKILL.md, README.md.~~ 완료(2026-11-23).
    - SKILL.md 핵심 규칙: 본 세션 Claude는 격리 폴더 파일을 직접 읽지 않는다(guard는 허용하지만, 읽으면 함정 문장이 본 세션에 닿아 밀폐 읽기실의 의미가 없어진다). 보고서를 줄이거나 좋게 바꿔 말하지 않는다. 스크립트는 정해진 형태로 한 번에 하나씩.
    - SKILL.md는 스킬이 불릴 때 Claude Code가 알려 주는 "기본 폴더(Base directory)" 와 `$ARGUMENTS` 를 쓴다고 가정했다. 둘 다 7단계에서 실제로 확인해야 한다.
-   - 설치는 심볼릭 링크가 아니라 복사(`rsync -a --exclude tests --exclude .git`). guard는 스크립트 경로를 글자 그대로 비교하므로 링크 설치에서는 스크립트 실행이 막힌다.
+   - 설치는 심볼릭 링크가 아니라 복사(`rsync -a --exclude tests --exclude .git --exclude CLAUDE.md`). CLAUDE.md는 개인 정보가 든 개발용 메모라 설치본에 넣지 않는다. guard는 스크립트 경로를 글자 그대로 비교하므로 링크 설치에서는 스크립트 실행이 막힌다.
    - README는 기존 훅(이 맥에는 다른 앱의 훅이 이미 있다)을 지우지 말고 추가하라고, 고치기 전에 백업하라고 안내한다.
    - 문서 자체 스캔: SKILL.md는 노랑 2건뿐(설명 속 `npx skills add`, `~/.claude/skills` 언급). README는 함정 문장 예시와 규칙 설명 때문에 빨강. README에 그 이유를 적어 두었다.
 7. 실제 Claude Code에서 처음부터 끝까지 시험. skill-bound로 skill-bound 점검.
+   - A단계(`claude -p` 에 진짜 훅을 붙여 시험) 완료(2026-11-23). 10-8절 참고.
+   - B단계(진짜 settings.json에 등록하고 사람이 허락 창에 답하기)는 아직. 10-9절 참고.
 
 ## 12. 코드 작성 규칙
 

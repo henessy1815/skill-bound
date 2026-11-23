@@ -41,14 +41,14 @@
 
 ### 1. 파일 복사
 
-skill-bound 폴더를 `~/.claude/skills/skill-bound` 에 **복사**합니다. 테스트용 악성 샘플(`tests/`)은 빼고 복사합니다.
+skill-bound 폴더를 `~/.claude/skills/skill-bound` 에 **복사**합니다. 테스트용 악성 샘플(`tests/`)과 개발용 메모(`CLAUDE.md`)는 빼고 복사합니다.
 
 ```bash
 mkdir -p ~/.claude/skills
 ```
 
 ```bash
-rsync -a --exclude tests --exclude .git /path/to/skill-bound/ ~/.claude/skills/skill-bound/
+rsync -a --exclude tests --exclude .git --exclude CLAUDE.md /path/to/skill-bound/ ~/.claude/skills/skill-bound/
 ```
 
 `/path/to/skill-bound` 는 이 폴더가 있는 곳으로 바꿉니다.

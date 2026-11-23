@@ -540,9 +540,12 @@ def _hash_file(path, st):
         return _hash_bytes(handle.read())
 
 
-def _walk_tree(prefix, folder, out, budget):
-    # type: (str, str, Dict[str, str], List[int]) -> None
-    """폴더 안 파일을 {키: 해시}에 넣는다. 심볼릭 링크는 따라가지 않고 대상 경로를 기록한다."""
+def _walk_tree(prefix, folder, out, budget, skip_dirs=()):
+    # type: (str, str, Dict[str, str], List[int], Tuple[str, ...]) -> None
+    """폴더 안 파일을 {키: 해시}에 넣는다. 심볼릭 링크는 따라가지 않고 대상 경로를 기록한다.
+
+    skip_dirs에 있는 이름의 폴더는 건너뛴다(내용과 상관없이 늘 바뀌는 폴더).
+    """
     if not os.path.isdir(folder) or os.path.islink(folder):
         return
     stack = [""]
@@ -561,7 +564,8 @@ def _walk_tree(prefix, folder, out, budget):
             except OSError:
                 continue
             if stat.S_ISDIR(st.st_mode):
-                stack.append(rel)
+                if name not in skip_dirs:
+                    stack.append(rel)
                 continue
             budget[0] -= 1
             if budget[0] < 0:
@@ -607,7 +611,9 @@ def collect_inventory(ctx, project_dir):
             out["user-plugins:" + name] = _hash_file(path, os.stat(path))
         except OSError:
             pass
-    _walk_tree("user-plugin-cache", os.path.join(claude_dir, "plugins", "cache"), out, budget)
+    # .in_use/<프로세스 번호> 는 Claude가 켜질 때 생기고 꺼질 때 사라지는 표시 파일이다.
+    # 플러그인 내용이 아니므로 비교에서 뺀다(넣으면 세션마다 "바뀌었다"는 거짓 알림이 뜬다).
+    _walk_tree("user-plugin-cache", os.path.join(claude_dir, "plugins", "cache"), out, budget, skip_dirs=(".in_use",))
     for name in ("settings.json", "settings.local.json"):
         _hash_json_keys("user-" + name, os.path.join(claude_dir, name), SETTINGS_KEYS, out)
     # ~/.claude.json 에는 MCP 서버 설정이 들어 있다.

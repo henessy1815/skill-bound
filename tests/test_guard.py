@@ -449,6 +449,24 @@ class SessionStartTest(GuardBase):
             handle.write("{}")
         self.assertIn("project:.mcp.json", self.start()["systemMessage"])
 
+    def test_plugin_in_use_markers_ignored(self):
+        """통합 시험에서 찾은 거짓 알림: Claude가 켜질 때마다 생기는 .in_use 표시 파일."""
+        version = os.path.join(self.home, ".claude", "plugins", "cache", "market", "plugin", "1.0.0")
+        os.makedirs(os.path.join(version, ".in_use"))
+        self.write_file(os.path.join(version, "README.md"), "x\n")
+        self.write_file(os.path.join(version, ".in_use", "111"), "")
+        self.start()
+        os.unlink(os.path.join(version, ".in_use", "111"))
+        self.write_file(os.path.join(version, ".in_use", "222"), "")
+        self.assertIsNone(self.start())
+        self.write_file(os.path.join(version, "README.md"), "changed\n")
+        self.assertIn("user-plugin-cache:market", self.start()["systemMessage"])
+
+    @staticmethod
+    def write_file(path, text):
+        with open(path, "w") as handle:
+            handle.write(text)
+
     def test_off_is_silent(self):
         self.start()
         self.add_skill("x")
