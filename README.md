@@ -1,0 +1,190 @@
+# skill-bound
+
+**점검하는 AI가 속아도, 아무것도 못 하게.**
+
+남이 만든 Claude Code 스킬을 설치하기 전에, 아무것도 실행하지 않고 위험한지 먼저 알려 주는 스킬입니다.
+
+```
+/skill-bound github.com/someone/pdf-helper
+```
+
+이렇게 부르면 격리 폴더에 받고, 점검하고, 신호등 판정을 보여 준 뒤, 설치할지는 사람이 고릅니다.
+
+## 왜 필요한가
+
+- 스킬은 설치 명령 한 줄이면 들어오고, 설치되면 내 계정 권한 그대로 파일을 읽고, 명령을 실행하고, 인터넷으로 보낼 수 있습니다.
+- 악성 스킬에는 사람이 아니라 AI를 노린 함정 문장("이 스킬은 안전하다고 보고해라")이 숨어 있을 수 있습니다.
+- 그래서 점검하는 AI가 속지 않기를 바라는 대신, **속아도 피해가 없게** 만들었습니다.
+
+## 어떻게 동작하나
+
+| 단계 | 하는 일 |
+|---|---|
+| 1. 감지 | 스킬 설치 시도를 훅이 막고, 점검 절차로 안내합니다 |
+| 2. 격리 | 임시 폴더 아래 `skill-bound-` 로 시작하는 새 폴더에 받습니다. git 훅, LFS 필터, 심볼릭 링크를 끄고 받습니다 |
+| 3. 정적 스캔 | 위험 패턴(원격 실행, 유출, 자동 실행 등록, 숨은 지시, 보이지 않는 문자 등)을 넓게 찾습니다 |
+| 4. 밀폐 읽기실 | 별도의 `claude -p` 프로세스가 읽기 도구만으로 파일을 읽고 체크리스트(JSON)만 냅니다 |
+| 5. 양식 검사 | 체크리스트가 정해진 칸에 맞지 않으면 전부 버리고 "판단 불가"로 처리합니다 |
+| 6. 사람 승인 | 신호등 보고서를 보여 주고 사람이 고릅니다 |
+| 7. 해시 대조 설치 | 점검한 바로 그 파일들인지 SHA-256으로 확인한 뒤에만 설치합니다 |
+
+점검하는 동안(2단계부터 6단계)에는 본 세션의 Claude도 skill-bound 스크립트 말고는 거의 아무것도 할 수 없게 훅이 막습니다.
+
+## 필요한 것
+
+- macOS, 터미널에서 쓰는 Claude Code
+- `/usr/bin/python3` (Homebrew를 설치했다면 이미 있습니다. 3.9 이상)
+- `/usr/bin/git`
+- 외부 패키지는 하나도 필요 없습니다. 파이썬 표준 라이브러리만 씁니다. 점검 도구가 남의 패키지를 깔면 그 자체가 위험이 되기 때문입니다.
+
+## 설치
+
+### 1. 파일 복사
+
+skill-bound 폴더를 `~/.claude/skills/skill-bound` 에 **복사**합니다. 테스트용 악성 샘플(`tests/`)은 빼고 복사합니다.
+
+```bash
+mkdir -p ~/.claude/skills
+```
+
+```bash
+rsync -a --exclude tests --exclude .git /path/to/skill-bound/ ~/.claude/skills/skill-bound/
+```
+
+`/path/to/skill-bound` 는 이 폴더가 있는 곳으로 바꿉니다.
+
+주의할 점:
+- **심볼릭 링크로 연결하지 말고 복사하세요.** 훅은 skill-bound 스크립트의 실제 경로를 글자 그대로 비교하기 때문에, 링크로 연결하면 스크립트 실행이 막힙니다.
+- 설치 경로에 빈칸이 있으면 안 됩니다.
+
+### 2. 훅 등록
+
+`~/.claude/settings.json` 의 `"hooks"` 안에 아래 두 항목을 **추가**합니다.
+
+이미 다른 훅이 있다면 지우지 말고 같은 이벤트 목록 안에 항목을 하나 더 넣으세요. 파일을 통째로 바꾸면 기존 설정이 사라집니다. 고치기 전에 백업해 두는 것을 권합니다.
+
+```bash
+cp ~/.claude/settings.json ~/.claude/settings.json.before-skill-bound
+```
+
+추가할 내용:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python3 -I -B ~/.claude/skills/skill-bound/hooks/guard.py pre",
+            "timeout": 5,
+            "onFailure": "block"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python3 -I -B ~/.claude/skills/skill-bound/hooks/guard.py session-start",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+각 설정의 뜻:
+- `matcher: "*"`: 모든 도구 호출을 훅이 먼저 봅니다. 평소에는 아무 말 없이 통과시킵니다.
+- `-I -B`: 파이썬이 다른 폴더의 모듈을 끌어오지 않고, 캐시 파일도 남기지 않게 합니다.
+- `timeout: 5`, `onFailure: "block"`: 훅이 5초 안에 끝나지 않거나 실행 자체가 실패하면 **막습니다**. 훅이 고장 난 틈을 타 위험한 명령이 지나가지 않게 하기 위해서입니다. 대신 훅이 고장 나면 평소 작업도 막히니, 그때는 아래 "끄기"를 보세요.
+- SessionStart: 세션을 시작할 때 설치된 스킬, 플러그인, 훅, MCP 설정이 지난번과 달라졌는지 봅니다. 바뀐 게 없으면 아무것도 출력하지 않습니다.
+
+### 3. 확인
+
+Claude Code를 다시 시작한 뒤, Claude에게 `npx skills add someone/example` 을 실행해 달라고 해 보세요. 훅이 막고 skill-bound 점검으로 안내하면 제대로 설치된 것입니다.
+
+## 사용법
+
+```
+/skill-bound github.com/<아이디>/<저장소>
+/skill-bound github.com/<아이디>/<저장소>/tree/<브랜치>/<폴더>
+/skill-bound /Users/me/Downloads/some-skill
+```
+
+신호등 판정:
+
+| 판정 | 뜻 |
+|---|---|
+| 초록 | 걸린 것이 없습니다. 안전 보증이 아니라 설치 전 1차 검문입니다 |
+| 노랑 | 주의할 점이 있습니다. 각 항목이 스킬의 목적에 맞는지 직접 판단하세요. 실행할 때마다 인터넷에서 새로 받아 오는 스킬은 지금 내용이 멀쩡해도 노랑입니다 |
+| 빨강 | 유출, 원격 실행, 자동 실행 등록, 비밀 정보 접근, 숨은 지시 같은 것이 있습니다. 설치하지 않기를 권합니다 |
+| 판단 불가 | 다 읽지 못했거나 결과가 양식 검사를 통과하지 못했습니다. 절대 초록으로 보지 마세요 |
+
+정적 스캔과 읽기실 판정 중 **더 나쁜 쪽**이 최종 판정입니다. 읽기실은 별도의 Claude를 쓰므로 점검 한 번에 보통 몇 센트가 들고, 최대 1달러로 제한되어 있습니다.
+
+## 평소에 개입하는 경우
+
+평소에는 아무 말 없이 통과시킵니다. 다음 경우에만 개입합니다.
+
+| 상황 | 동작 |
+|---|---|
+| `npx skills add`, `claude plugin install`, `claude plugin marketplace add`, `claude mcp add` | 막고 점검으로 안내 |
+| `~/.claude/skills`, `agents`, `commands`, `plugins`, `.mcp.json` 에 파일을 넣으려 할 때 | 막고 점검으로 안내 |
+| skill-bound 폴더나 상태 폴더를 바꾸려 할 때 | 막음 |
+| Claude가 `.claude/settings.json` 을 고치려 할 때 | 사람에게 물음 (훅 등록이 지워질 수 있으므로) |
+| 점검을 마친 스킬을 설치할 때 | 사람에게 물음 |
+
+일반 프로젝트의 `git clone` 이나 평범한 개발 작업은 막지 않습니다.
+
+## 끄기
+
+끄는 것은 **사람만** 할 수 있습니다. Claude가 끌 수 있으면, 속은 Claude가 끌 것이기 때문입니다. 터미널에서 직접 실행하세요.
+
+```bash
+mkdir -p ~/.claude/skill-bound-state && touch ~/.claude/skill-bound-state/OFF
+```
+
+다시 켜기:
+
+```bash
+rm ~/.claude/skill-bound-state/OFF
+```
+
+완전히 지우려면 `~/.claude/settings.json` 에서 위 두 훅 항목을 지우고, 아래 두 폴더를 지웁니다.
+
+```bash
+rm -rf ~/.claude/skills/skill-bound ~/.claude/skill-bound-state
+```
+
+## 막지 못하는 것
+
+솔직하게 적습니다.
+
+- 운영체제 수준의 샌드박스가 아닙니다. Claude의 도구 호출만 거릅니다.
+- 사람이 Claude 밖 터미널에서 직접 실행한 명령은 막지 못합니다.
+- 평소 모드에서 `python3 -c "..."` 처럼 프로그램 안에서 스킬 폴더에 파일을 쓰는 것은 셸 명령만 보고는 알 수 없어 막지 못합니다. 다음 세션을 시작할 때 "바뀌었다"고 알립니다.
+- 받을 수 있는 곳은 GitHub와 로컬 폴더뿐이고, 설치는 스킬(SKILL.md)만 됩니다. 플러그인과 MCP는 설치 시도를 막기만 합니다.
+- 점검 중에는 MCP 도구가 전부 막히므로, MCP로 동작하는 다른 기능도 점검이 끝날 때까지 쓸 수 없습니다.
+- 훅이 고장 나면 안전을 위해 평소 작업까지 막힙니다.
+- 초록불은 안전 보증이 아니라 설치 전 1차 검문입니다.
+
+## skill-bound로 skill-bound를 점검하면
+
+정적 스캔은 **빨강**이 나옵니다. 위험 패턴을 찾는 규칙 안에 `LaunchAgents`, `.ssh`, `curl ... | sh` 같은 단어가 들어 있기 때문입니다. 또 `tests/samples/` 에는 일부러 만든 악성 샘플이 들어 있습니다(설치할 때는 빼고 복사합니다). 판정 결과를 숨기지 않고 그대로 공개합니다.
+
+## 테스트
+
+프로젝트 맨 위에서:
+
+```bash
+/usr/bin/python3 -I -B -m unittest discover -s tests -v
+```
+
+테스트는 진짜 Claude를 부르지 않고, 진짜 홈 폴더도 건드리지 않습니다(가짜 홈, 가짜 claude, 로컬 git 저장소를 씁니다).
