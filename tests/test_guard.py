@@ -506,6 +506,19 @@ class SessionStartTest(GuardBase):
         with open(path, "w") as handle:
             handle.write(text)
 
+    def test_empty_mcp_entry_is_not_a_change(self):
+        """통합 시험에서 찾은 거짓 알림: 새 폴더를 믿으면 Claude가 빈 mcpServers 칸을 만든다."""
+        claude_json = os.path.join(self.home, ".claude.json")
+        with open(claude_json, "w") as handle:
+            json.dump({"projects": {}}, handle)
+        self.start()
+        with open(claude_json, "w") as handle:
+            json.dump({"mcpServers": {}, "projects": {self.project: {"mcpServers": {}, "allowedTools": []}}}, handle)
+        self.assertIsNone(self.start())
+        with open(claude_json, "w") as handle:
+            json.dump({"projects": {self.project: {"mcpServers": {"x": {"command": "npx"}}}}}, handle)
+        self.assertIn("project-claude.json:mcpServers", self.start()["systemMessage"])
+
     def test_off_is_silent(self):
         self.start()
         self.add_skill("x")

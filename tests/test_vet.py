@@ -69,6 +69,35 @@ class ParseSourceTest(unittest.TestCase):
             vet.skill_name_for({"kind": "local", "path": "/tmp/.hidden"})
 
 
+class SafeGitTest(unittest.TestCase):
+    """통합 시험에서 맥 키체인 암호 창이 뜬 문제: 남의 저장소를 받을 때 내 git 설정을 쓰지 않는다."""
+
+    def test_env_ignores_system_and_user_git_config(self):
+        env = vet.safe_git_env({"PATH": "/usr/bin", "HOME": "/x", "GIT_DIR": "/evil", "GIT_CONFIG_COUNT": "1",
+                                "GIT_SSH_COMMAND": "evil"})
+        self.assertEqual(env["GIT_CONFIG_NOSYSTEM"], "1")
+        self.assertEqual(env["GIT_CONFIG_GLOBAL"], "/dev/null")
+        self.assertEqual(env["GIT_TERMINAL_PROMPT"], "0")
+        for key in ("GIT_DIR", "GIT_CONFIG_COUNT", "GIT_SSH_COMMAND"):
+            self.assertNotIn(key, env)
+        self.assertEqual(env["PATH"], "/usr/bin")
+
+    def test_credential_helper_disabled(self):
+        self.assertIn("credential.helper=", vet.SAFE_GIT_CONFIG)
+
+    @unittest.skipIf(vet.git_binary() is None, "git 없음")
+    def test_git_sees_only_our_settings(self):
+        cmd = [vet.git_binary()]
+        for item in vet.SAFE_GIT_CONFIG:
+            cmd += ["-c", item]
+        cmd += ["config", "--list", "--show-origin"]
+        out = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=vet.safe_git_env(),
+                             cwd=tempfile.gettempdir(), universal_newlines=True).stdout
+        origins = {line.split("\t")[0] for line in out.strip().split("\n") if line}
+        self.assertEqual(origins, {"command line:"})
+        self.assertNotIn("osxkeychain", out)
+
+
 class VetBase(unittest.TestCase):
 
     def setUp(self):

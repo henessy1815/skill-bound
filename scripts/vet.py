@@ -148,6 +148,7 @@ def git_binary():
 
 # 받는 동안 아무것도 실행되지 않게 하는 git 설정
 SAFE_GIT_CONFIG = [
+    "credential.helper=",            # 저장된 로그인 정보(맥 키체인 등)를 쓰지 않음. 남의 공개 저장소만 받는다
     "core.hooksPath=/dev/null",      # 훅 실행 안 함
     "core.symlinks=false",           # 심볼릭 링크를 링크가 아닌 글 파일로
     "core.fsmonitor=false",
@@ -158,6 +159,29 @@ SAFE_GIT_CONFIG = [
     "protocol.allow=never",          # https만 허용
     "protocol.https.allow=always",
 ]
+
+
+def safe_git_env(base=None):
+    # type: (Optional[Dict[str, str]]) -> Dict[str, str]
+    """git을 실행할 환경 변수. 시스템과 사용자의 git 설정 파일을 아예 읽지 않게 한다.
+
+    통합 시험에서 없는 저장소를 받으려 하자, 시스템 git 설정의 키체인 도우미 때문에
+    맥 키체인 암호를 묻는 창이 떴다. 남의 스킬을 받을 때 내 로그인 정보나 git 설정
+    (키체인, 필터, 주소 바꾸기 등)이 끼어들 이유가 없으므로 전부 끊는다.
+    """
+    env = dict(os.environ if base is None else base)
+    for key in list(env):
+        if key.startswith("GIT_"):
+            del env[key]  # 밖에서 들어온 GIT_ 설정(GIT_DIR, GIT_CONFIG_* 등)도 버린다
+    env.update({
+        "GIT_CONFIG_NOSYSTEM": "1",      # /etc/gitconfig, Homebrew gitconfig 등 무시
+        "GIT_CONFIG_GLOBAL": "/dev/null",  # ~/.gitconfig 무시
+        "GIT_TERMINAL_PROMPT": "0",      # 아이디, 암호를 묻지 않음
+        "GIT_ASKPASS": "/usr/bin/false",
+        "SSH_ASKPASS": "/usr/bin/false",
+        "GIT_LFS_SKIP_SMUDGE": "1",
+    })
+    return env
 
 
 def git_clone(url, dest, ref=None, extra_config=None, timeout=GIT_TIMEOUT):
@@ -172,11 +196,9 @@ def git_clone(url, dest, ref=None, extra_config=None, timeout=GIT_TIMEOUT):
     if ref:
         cmd += ["--branch", ref]
     cmd += ["--", url, dest]
-    env = dict(os.environ)
-    env.update({"GIT_TERMINAL_PROMPT": "0", "GIT_LFS_SKIP_SMUDGE": "1", "GIT_ASKPASS": "/usr/bin/false"})
     try:
         proc = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL,
-                              env=env, timeout=timeout)
+                              env=safe_git_env(), timeout=timeout)
     except subprocess.TimeoutExpired:
         raise VetError("FETCH_TIMEOUT")
     except OSError:

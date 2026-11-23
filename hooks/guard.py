@@ -640,11 +640,15 @@ def collect_inventory(ctx, project_dir):
         with open(os.path.join(ctx.home, ".claude.json"), encoding="utf-8") as handle:
             data = json.load(handle)
         if isinstance(data, dict):
-            out["user-claude.json:mcpServers"] = _hash_bytes(json.dumps(data.get("mcpServers"), sort_keys=True).encode())
+            # MCP 서버가 하나도 없으면(칸이 없거나 빈 값) 기록하지 않는다. 통합 시험에서, 새 폴더를
+            # 처음 "믿겠다"고 하면 Claude가 빈 mcpServers 칸을 만들어 "MCP 설정이 생겼다"는 거짓 알림이 떴다.
+            if data.get("mcpServers"):
+                out["user-claude.json:mcpServers"] = _hash_bytes(json.dumps(data.get("mcpServers"), sort_keys=True).encode())
             projects = data.get("projects")
             if isinstance(projects, dict) and project_dir and isinstance(projects.get(project_dir), dict):
                 servers = projects[project_dir].get("mcpServers")
-                out["project-claude.json:mcpServers"] = _hash_bytes(json.dumps(servers, sort_keys=True).encode())
+                if servers:
+                    out["project-claude.json:mcpServers"] = _hash_bytes(json.dumps(servers, sort_keys=True).encode())
     except (OSError, ValueError):
         pass
     if project_dir:
