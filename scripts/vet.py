@@ -268,6 +268,24 @@ def fetch(source, quarantine, extra_git_config=None, url_override=None):
     shutil.rmtree(work, ignore_errors=True)
 
 
+# 맥이 폴더를 열 때 저절로 만드는 파일. 스킬 내용이 아니고, 남겨 두면 스캔에서 매번
+# "바이너리 파일" 노랑으로 잡혀 쓸데없는 경고가 된다(통합 시험에서 발견). 받은 직후 지운다.
+JUNK_FILE_NAMES = frozenset([".DS_Store"])
+
+
+def remove_junk(root):
+    # type: (str) -> int
+    removed = 0
+    for dirpath, _dirs, filenames in os.walk(root, followlinks=False):
+        for name in filenames:
+            if name in JUNK_FILE_NAMES:
+                full = os.path.join(dirpath, name)
+                if os.path.isfile(full) and not os.path.islink(full):
+                    os.unlink(full)
+                    removed += 1
+    return removed
+
+
 # ---------------------------------------------------------------------------
 # 해시 기록 (install_checked.py도 쓴다)
 # ---------------------------------------------------------------------------
@@ -344,6 +362,7 @@ def start(source_text, session_id, ctx, extra_git_config=None, url_override=None
     quarantine = os.path.realpath(tempfile.mkdtemp(prefix="skill-bound-", dir=ctx.tmp_dir))  # type: ignore
     try:
         fetch(source, quarantine, extra_git_config=extra_git_config, url_override=url_override)
+        remove_junk(quarantine)
         files, others = hash_tree(quarantine)
         if not files and not others:
             raise VetError("EMPTY")

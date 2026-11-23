@@ -181,6 +181,16 @@ class StartEndTest(VetBase):
         self.assertEqual(manifest["others"], ["keys"])
         self.assertNotIn("keys/id_rsa", manifest["files"])
 
+    def test_ds_store_removed(self):
+        self.write(os.path.join(self.local, ".DS_Store"), "\x00\x00junk")
+        self.write(os.path.join(self.local, "scripts", ".DS_Store"), "\x00\x00junk")
+        out = self.start_local()
+        q = out["quarantine"]
+        self.assertFalse(os.path.exists(os.path.join(q, ".DS_Store")))
+        self.assertFalse(os.path.exists(os.path.join(q, "scripts", ".DS_Store")))
+        self.assertEqual(out["files"], 2)
+        self.assertNotIn(".DS_Store", vet.load_manifest(self.ctx, q)["files"])
+
     def test_local_fifo_rejected(self):
         os.mkfifo(os.path.join(self.local, "pipe"))
         with self.assertRaises(vet.VetError) as ctx:

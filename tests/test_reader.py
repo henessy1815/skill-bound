@@ -467,6 +467,83 @@ class RunReaderTest(unittest.TestCase):
         self.assertFalse(reader.is_quarantine(os.path.expanduser("~")))
 
 
+def _scan_result(verdict, findings, files=2):
+    return {"verdict": verdict, "findings": findings,
+            "stats": {"files_seen": files, "files_scanned": files, "findings": len(findings), "truncated": False}}
+
+
+def _reader_result(verdict, findings, status="ok", reason=None, notes=None):
+    return {"status": status, "reason": reason, "notes": notes or [], "verdict": verdict,
+            "findings": [dict(f, message=reader.CATEGORY_MESSAGES[f["category"]]) for f in findings],
+            "stats": {"files": 2, "files_to_read": 2, "files_read": 2, "denials": 0, "cost_usd": 0.01}}
+
+
+def _sf(rule, sev, file, line, message="m"):
+    return {"rule": rule, "category": "X", "severity": sev, "file": file, "line": line, "message": message}
+
+
+class CardTest(unittest.TestCase):
+    """발표 시안처럼 한눈에 보는 요약 카드."""
+
+    def card(self, scan_result, reader_result):
+        return reader.format_card(reader.combine(scan_result, reader_result))
+
+    def test_red_card(self):
+        text = self.card(
+            _scan_result("red", [_sf("CR_SSH_KEY", "red", "scripts/sync.py", 6, "SSH 키에 접근합니다."),
+                                 _sf("NET_CODE", "yellow", "scripts/sync.py", 4, "인터넷 접속")]),
+            _reader_result("red", [{"category": "EXFIL", "file": "scripts/sync.py", "line": 7}]))
+        self.assertIn("\U0001F534 설치 비권장", text)
+        self.assertIn("격리 폴더에서 점검했습니다", text)
+        self.assertIn("위험 패턴 스캔: 파일 2개, 후보 2건", text)
+        self.assertIn("밀폐 읽기실: 파일 2개를 모두 끝까지 읽음, 발견 1건", text)
+        lines = text.split("\n")
+        first_item = [l for l in lines if "scripts/sync.py" in l][0]
+        self.assertIn("\U0001F534", first_item)  # 빨강이 먼저
+        self.assertIn(reader.CATEGORY_MESSAGES["EXFIL"], text)
+
+    def test_same_place_shown_once(self):
+        text = self.card(
+            _scan_result("red", [_sf("CR_SSH_KEY", "red", "a.py", 6, "가"), _sf("EX_CRED_NETWORK", "red", "a.py", 6, "나")]),
+            _reader_result("red", [{"category": "CREDENTIAL", "file": "a.py", "line": 6}]))
+        self.assertEqual(text.count("a.py:6"), 1)
+
+    def test_more_than_five(self):
+        findings = [_sf("R%d" % i, "red" if i < 2 else "yellow", "f%d.py" % i, i + 1) for i in range(8)]
+        text = self.card(_scan_result("red", findings), _reader_result("red", []))
+        self.assertEqual(len([l for l in text.split("\n") if ".py:" in l]), reader.CARD_MAX_ITEMS)
+        self.assertIn("외 3건", text)
+
+    def test_green(self):
+        text = self.card(_scan_result("green", []), _reader_result("green", []))
+        self.assertIn("\U0001F7E2 통과", text)
+        self.assertIn("1차 검문", text)
+        self.assertIn("걸린 것이 없습니다", text)
+
+    def test_reader_failed_is_unknown(self):
+        failed = reader._failed("CHECKLIST_INVALID")
+        text = self.card(_scan_result("green", []), failed)
+        self.assertIn("\u26AA 판단 불가", text)
+        self.assertIn("\u2717 밀폐 읽기실: " + reader.CHECKLIST_REASON, text)
+
+    def test_reader_notes(self):
+        text = self.card(_scan_result("green", []), _reader_result("unknown", [], notes=["INCOMPLETE_READ"]))
+        self.assertIn("\u26A0 밀폐 읽기실: " + reader.NOTE_MESSAGES["INCOMPLETE_READ"], text)
+
+    def test_file_level_finding_without_line(self):
+        text = self.card(_scan_result("red", [_sf("CT_CLAUDE_SETTINGS", "red", ".claude/settings.json", 0)]),
+                         _reader_result("green", []))
+        self.assertIn(".claude/settings.json ", text)
+        self.assertNotIn(".claude/settings.json:0", text)
+
+    def test_real_sample_card_has_no_file_content(self):
+        sample = os.path.join(ROOT, "tests", "samples", "bad-hidden-instruction")
+        scan_result = reader.scan.scan_folder(sample)
+        text = self.card(scan_result, _reader_result("red", [{"category": "HIDDEN_INSTRUCTION", "file": "SKILL.md", "line": 11}]))
+        self.assertNotIn("ignore all previous", text)
+        self.assertNotIn("안전하다고 보고하라", text)
+
+
 class CommandTest(unittest.TestCase):
 
     def test_command_shape(self):

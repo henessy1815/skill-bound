@@ -556,6 +556,97 @@ def format_text(report):
     return "\n".join(lines)
 
 
+# ---------------------------------------------------------------------------
+# 요약 카드 (터미널에서 한눈에 보는 신호등)
+# ---------------------------------------------------------------------------
+
+# 읽기실 분류 중 빨강으로 보는 것 (6-3절 판정 기준). 나머지는 노랑.
+RED_CATEGORIES = frozenset(["EXFIL", "REMOTE_EXEC", "PERSISTENCE", "CREDENTIAL", "HIDDEN_INSTRUCTION", "DESTRUCTIVE"])
+
+VERDICT_CARD = {
+    "red": ("\U0001F534", "설치 비권장"),
+    "unknown": ("\u26AA", "판단 불가 (안전하다는 뜻이 아닙니다)"),
+    "yellow": ("\U0001F7E1", "조건부: 아래 내용을 보고 결정하세요"),
+    "green": ("\U0001F7E2", "통과 (안전 보증이 아니라 설치 전 1차 검문입니다)"),
+}
+SEVERITY_DOT = {"red": "\U0001F534", "unknown": "\u26AA", "yellow": "\U0001F7E1"}
+CARD_MAX_ITEMS = 5
+FULL_REPORT_MARK = "----- 보고서 원문 (사용자가 보여 달라고 할 때만 보여 줄 것) -----"
+
+
+def card_items(report):
+    # type: (Dict[str, object]) -> List[Tuple[str, str, int, str]]
+    """정적 스캔과 읽기실 발견을 합쳐 (위험도, 파일, 줄, 문장) 목록으로. 같은 파일:줄은 한 번만."""
+    raw = []  # type: List[Tuple[str, str, int, str]]
+    for f in report["scan"]["findings"]:  # type: ignore
+        raw.append((str(f["severity"]), str(f["file"]), int(f["line"]), str(f["message"])))
+    reader_result = report["reader"]  # type: Dict[str, object]  # type: ignore
+    for f in reader_result.get("findings", []):  # type: ignore
+        sev = "red" if f["category"] in RED_CATEGORIES else "yellow"
+        raw.append((sev, str(f["file"]), int(f["line"]), str(f["message"])))
+    raw.sort(key=lambda x: (-scan.SEVERITY_RANK[x[0]], x[1], x[2]))
+    seen = set()
+    items = []  # type: List[Tuple[str, str, int, str]]
+    for item in raw:
+        key = (item[1], item[2]) if item[2] else (item[1], item[3])
+        if key in seen:
+            continue
+        seen.add(key)
+        items.append(item)
+    return items
+
+
+def format_card(report):
+    # type: (Dict[str, object]) -> str
+    """발표 시안처럼 한눈에 보는 요약. 고정 문장, 검사한 경로, 줄 번호만 쓴다."""
+    scan_result = report["scan"]  # type: Dict[str, object]  # type: ignore
+    reader_result = report["reader"]  # type: Dict[str, object]  # type: ignore
+    scan_stats = scan_result["stats"]  # type: Dict[str, object]  # type: ignore
+    reader_stats = reader_result["stats"]  # type: Dict[str, object]  # type: ignore
+
+    lines = ["\u2713 격리 폴더에서 점검했습니다 (받은 파일은 아무것도 실행하지 않음)"]
+    if scan_result["verdict"] == "unknown":
+        lines.append("\u26A0 위험 패턴 스캔: 일부 파일을 점검하지 못했습니다")
+    else:
+        lines.append("\u2713 위험 패턴 스캔: 파일 %s개, 후보 %s건" % (scan_stats["files_scanned"], scan_stats["findings"]))
+    if reader_result["status"] != "ok":
+        reason = str(reader_result["reason"])
+        text = CHECKLIST_REASON if reason == "CHECKLIST_INVALID" else REASON_MESSAGES.get(reason, reason)
+        lines.append("\u2717 밀폐 읽기실: " + text)
+    elif reader_result["notes"]:
+        lines.append("\u26A0 밀폐 읽기실: " + " ".join(NOTE_MESSAGES[n] for n in reader_result["notes"]))  # type: ignore
+    else:
+        lines.append("\u2713 밀폐 읽기실: 파일 %s개를 모두 끝까지 읽음, 발견 %d건" % (
+            reader_stats["files_to_read"], len(reader_result["findings"])))  # type: ignore
+
+    emoji, label = VERDICT_CARD[str(report["verdict"])]
+    lines += ["", "%s %s" % (emoji, label), ""]
+
+    items = card_items(report)
+    shown = items[:CARD_MAX_ITEMS]
+    if not shown:
+        lines.append("  걸린 것이 없습니다.")
+    width = max([len(_where(i)) for i in shown] + [0])
+    for item in shown:
+        lines.append("  %s %s   %s" % (SEVERITY_DOT[item[0]], _where(item).ljust(width), item[3]))
+    rest = items[CARD_MAX_ITEMS:]
+    if rest:
+        reds = len([i for i in rest if i[0] == "red"])
+        others = len(rest) - reds
+        parts = []
+        if reds:
+            parts.append("빨강 %d" % reds)
+        if others:
+            parts.append("노랑, 판단 불가 %d" % others)
+        lines.append("  외 %d건 (%s)" % (len(rest), ", ".join(parts)))
+    return "\n".join(lines)
+
+
+def _where(item):
+    # type: (Tuple[str, str, int, str]) -> str
+    return item[1] if not item[2] else "%s:%d" % (item[1], item[2])
+
+
 MODEL_RE = re.compile(r"^[A-Za-z0-9._\-\[\]]{1,64}$")
 
 
@@ -563,7 +654,7 @@ def main(argv=None):
     # type: (Optional[List[str]]) -> int
     parser = argparse.ArgumentParser(description="skill-bound sealed reader (read-only claude -p)")
     parser.add_argument("folder")
-    parser.add_argument("--format", choices=("json", "text"), default="json")
+    parser.add_argument("--format", choices=("json", "text", "card"), default="json")
     parser.add_argument("--model", default=None)
     parser.add_argument("--max-budget-usd", type=float, default=1.0)
     args = parser.parse_args(argv)
@@ -585,7 +676,13 @@ def main(argv=None):
         return 2
     reader_result = run_reader(root_real, model=args.model, budget=args.max_budget_usd)
     report = combine(scan_result, reader_result)
-    if args.format == "text":
+    if args.format == "card":
+        # 요약 카드를 먼저, 그 아래에 보고서 원문. SKILL.md는 카드만 보여 주고 원문은 요청할 때만 보여 준다.
+        print(format_card(report))
+        print("")
+        print(FULL_REPORT_MARK)
+        print(format_text(report))
+    elif args.format == "text":
         print(format_text(report))
     else:
         print(json.dumps(report, ensure_ascii=False, indent=2))
