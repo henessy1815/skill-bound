@@ -18,7 +18,7 @@
 | 2. 격리           | 임시 폴더 아래 `skill-bound-` 로 시작하는 새 폴더에 받습니다. git 훅, LFS 필터, 심볼릭 링크를 끄고 받습니다 |
 | 3. 정적 스캔      | 위험 패턴(원격 실행, 유출, 자동 실행 등록, 숨은 지시, 보이지 않는 문자 등)을 넓게 찾습니다                  |
 | 4. 밀폐 읽기실    | 별도의 `claude -p` 프로세스가 읽기 도구만으로 파일을 읽고 체크리스트(JSON)만 냅니다                         |
-| 5. 양식 검사      | 체크리스트가 정해진 칸에 맞지 않으면 전부 버리고 "판단 불가"로 처리합니다                                   |
+| 5. 양식 검사      | 체크리스트가 정해진 칸에 맞지 않으면 전부 버리고 ⚪(판단 불가)로 처리합니다                                   |
 | 6. 사람 승인      | 신호등 보고서를 보여 주고 사람이 고릅니다                                                                   |
 | 7. 해시 대조 설치 | 점검한 바로 그 파일들인지 SHA-256으로 확인한 뒤에만 설치합니다                                              |
 
@@ -42,12 +42,12 @@ Claude에게 말로 부탁하면 됩니다.
 
 신호등 판정:
 
-| 판정      | 뜻                                                                                                                                                   |
-| --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 초록      | 걸린 것이 없습니다. 안전 보증이 아니라 설치 전 1차 검문입니다                                                                                        |
-| 노랑      | 주의할 점이 있습니다. 각 항목이 스킬의 목적에 맞는지 직접 판단하세요. 실행할 때마다 인터넷에서 새로 받아 오는 스킬은 지금 내용이 멀쩡해도 노랑입니다 |
-| 빨강      | 유출, 원격 실행, 자동 실행 등록, 비밀 정보 접근, 숨은 지시 같은 것이 있습니다. 설치하지 않기를 권합니다                                              |
-| 판단 불가 | 다 읽지 못했거나 결과가 양식 검사를 통과하지 못했습니다. 절대 초록으로 보지 마세요                                                                   |
+| 판정 | 뜻 |
+|---|---|
+| 🟢 | 걸린 것이 없습니다. 안전 보증이 아니라 설치 전 1차 검문입니다 |
+| 🟡 | 주의할 점이 있습니다. 각 항목이 스킬의 목적에 맞는지 직접 판단하세요. 실행할 때마다 인터넷에서 새로 받아 오는 스킬은 지금 내용이 멀쩡해도 🟡입니다 |
+| 🔴 | 유출, 원격 실행, 자동 실행 등록, 비밀 정보 접근, 숨은 지시 같은 것이 있습니다. 설치하지 않기를 권합니다 |
+| ⚪ | 판단 불가. 다 읽지 못했거나 결과가 양식 검사를 통과하지 못했습니다. 절대 🟢으로 보지 마세요 |
 
 정적 스캔과 읽기실 판정 중 **더 나쁜 쪽**이 최종 판정입니다. 읽기실은 별도의 Claude를 쓰므로 점검 한 번에 보통 몇 센트가 들고, 최대 1달러로 제한되어 있습니다.
 
@@ -63,37 +63,10 @@ mkdir -p ~/.claude/skills/skill-bound
 cp -R /tmp/skill-bound/SKILL.md /tmp/skill-bound/hooks /tmp/skill-bound/scripts /tmp/skill-bound/LICENSE ~/.claude/skills/skill-bound/
 ```
 
-**2. 훅을 등록합니다.** `~/.claude/settings.json` 을 백업한 뒤, `"hooks"` 안에 아래 두 항목을 추가합니다. 이미 다른 훅이 있으면 지우지 말고 옆에 덧붙이세요.
+**2. 훅을 등록합니다.** 아래 명령이 `~/.claude/settings.json` 을 백업한 뒤 skill-bound 훅 두 개를 덧붙입니다. 다른 훅과 설정은 그대로 둡니다.
 
-```json
-{
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/usr/bin/python3 -I -B ~/.claude/skills/skill-bound/hooks/guard.py pre",
-            "timeout": 5,
-            "onFailure": "block"
-          }
-        ]
-      }
-    ],
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/usr/bin/python3 -I -B ~/.claude/skills/skill-bound/hooks/guard.py session-start",
-            "timeout": 10
-          }
-        ]
-      }
-    ]
-  }
-}
+```bash
+/usr/bin/python3 -I -B ~/.claude/skills/skill-bound/scripts/switch.py setup
 ```
 
 **3. Claude Code를 다시 시작하면 끝입니다.**
@@ -111,7 +84,7 @@ cp -R /tmp/skill-bound/SKILL.md /tmp/skill-bound/hooks /tmp/skill-bound/scripts 
 | `scripts/reader.py` | 밀폐 읽기실 실행, 결과 양식 검사, 정적 스캔과 합친 신호등 카드 만들기 |
 | `scripts/reader_guard.py` | 밀폐 읽기실에만 붙는 훅. 읽기 도구 말고는 쓰지 못하게, 격리 폴더 밖은 읽지 못하게 한 번 더 막음 |
 | `scripts/install_checked.py` | 받을 때 기록한 해시와 똑같은 파일만 설치. 덮어쓰지 않고 실행 권한을 뺌 |
-| `scripts/switch.py` | 끄기, 다시 켜기, 완전히 지우기 |
+| `scripts/switch.py` | 훅 등록, 끄기, 다시 켜기, 완전히 지우기 |
 
 점검 기록을 두는 `~/.claude/skill-bound-state/` 는 각 컴퓨터에서 처음 쓸 때 저절로 생기므로 저장소에는 없습니다.
 
@@ -133,5 +106,5 @@ mkdir -p ~/.claude/skill-bound-state && touch ~/.claude/skill-bound-state/OFF
 - 받을 수 있는 곳은 GitHub와 로컬 폴더뿐이고, 설치는 스킬(SKILL.md)만 됩니다. 플러그인과 MCP는 설치 시도를 막기만 합니다.
 - 점검 중에는 MCP 도구가 전부 막히므로, MCP로 동작하는 다른 기능도 점검이 끝날 때까지 쓸 수 없습니다.
 - 훅이 고장 나면 안전을 위해 평소 작업까지 막힙니다.
-- 초록불은 안전 보증이 아니라 설치 전 1차 검문입니다.
-- skill-bound로 skill-bound 자신을 점검하면 빨강이 나옵니다. 위험 패턴을 찾는 규칙 안에 `curl ... | sh` 같은 찾으려는 말이 그대로 들어 있어서이고, 밀폐 읽기실은 훅 등록, git clone, 지우기 기능 같은 skill-bound 본래 기능만 짚어 노랑으로 판단했습니다.
+- 🟢은 안전 보증이 아니라 설치 전 1차 검문입니다.
+- skill-bound로 skill-bound 자신을 점검하면 🔴이 나옵니다. 위험 패턴을 찾는 규칙 안에 `curl ... | sh` 같은 찾으려는 말이 그대로 들어 있어서이고, 밀폐 읽기실은 훅 등록, git clone, 지우기 기능 같은 skill-bound 본래 기능만 짚어 🟡으로 판단했습니다.

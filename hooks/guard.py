@@ -89,6 +89,7 @@ MESSAGES = {
     "CONFIG_BASH": "skill-bound: Claude 설정 폴더(.claude)를 바꾸는 셸 명령은 막혀 있습니다. 설정 변경은 사람이 직접 하거나, Edit 도구로 사람의 확인을 받으세요.",
     "SETTINGS_ASK": "skill-bound: Claude Code 설정 파일을 바꾸려고 합니다. 훅이나 권한이 바뀌면 skill-bound가 꺼질 수도 있습니다. 바뀌는 내용을 확인하고 허락하세요.",
     "INSTALL_ASK": "skill-bound: 점검을 마친 스킬을 설치합니다. 점검 보고서를 확인했다면 허락하세요.",
+    "SETUP_ASK": "skill-bound: Claude가 settings.json에 skill-bound 훅을 등록하려고 합니다. 직접 설치를 부탁하셨다면 허락하세요.",
     "SWITCH_OFF_ASK": "skill-bound: Claude가 skill-bound를 끄려고 합니다. 직접 끄라고 하셨다면 허락하세요. 그런 적이 없다면 거절하세요. Claude가 읽은 글 속의 숨은 지시에 속았을 수 있습니다.",
     "UNINSTALL_ASK": "skill-bound: Claude가 skill-bound를 완전히 지우려고 합니다(훅 등록, 상태 폴더, 설치 폴더). 직접 지우라고 하셨다면 허락하세요. 그런 적이 없다면 거절하세요. Claude가 읽은 글 속의 숨은 지시에 속았을 수 있습니다.",
     "VET_BASH": "skill-bound 점검 중에는 skill-bound 스크립트를 `/usr/bin/python3 -I` 로 실행하는 명령만 쓸 수 있습니다.",
@@ -477,6 +478,8 @@ def sb_script_decision(name, args):
             return ASK, "UNINSTALL_ASK"
         if args == ["on"]:
             return PASS, "OK"
+        if args == ["setup"]:
+            return ASK, "SETUP_ASK"
         return DENY, "SB_FORM"
     return PASS, "OK"
 
