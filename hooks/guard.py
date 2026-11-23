@@ -783,12 +783,15 @@ def _read_event():
     return data
 
 
+CARD_TITLE = "skill-bound 점검 결과"
+
+
 def card_message(event, ctx):
     # type: (Dict[str, object], Ctx) -> Optional[str]
     """점검 모드에서 Claude가 선택 버튼(AskUserQuestion)을 띄우기 직전이면, 요약 카드를 돌려준다.
 
     통합 시험에서 Claude가 "카드를 답변에 옮겨 적어라"는 지시를 건너뛰어, 버튼만 뜨고 카드가
-    보이지 않았다. 그래서 카드는 Claude를 거치지 않고 훅이 화면에 직접 보여 준다. 속은 Claude가
+    보이지 않았다. 그래서 카드는 Claude를 거치지 않고 훅이 버튼 질문 글에 직접 붙인다. 속은 Claude가
     카드 내용을 바꿔 말할 수도 없게 된다.
     """
     if event.get("tool_name") != "AskUserQuestion":
@@ -797,7 +800,31 @@ def card_message(event, ctx):
     if mode != "vet" or quarantine is None:
         return None
     card = load_card(ctx.state_dir, quarantine)
-    return "skill-bound 점검 결과\n\n" + card if card else None
+    return CARD_TITLE + "\n\n" + card if card else None
+
+
+def with_card(tool_input, message):
+    # type: (object, str) -> Optional[Dict[str, object]]
+    """버튼 질문 글 맨 위에 카드를 붙인 새 입력. 모양이 예상과 다르면 None(손대지 않음).
+
+    처음엔 systemMessage로 카드를 보여 주려 했지만 실제 화면에 나타나지 않았다. 문서에 따르면
+    PreToolUse 훅은 updatedInput으로 AskUserQuestion의 입력을 바꿀 수 있다(allow와 함께).
+    """
+    if not isinstance(tool_input, dict):
+        return None
+    questions = tool_input.get("questions")
+    if not isinstance(questions, list) or not questions or not isinstance(questions[0], dict):
+        return None
+    first = dict(questions[0])
+    question = first.get("question")
+    if not isinstance(question, str):
+        return None
+    if question.startswith(CARD_TITLE):
+        return None  # 이미 붙어 있다
+    first["question"] = message + "\n\n" + question
+    new_input = dict(tool_input)
+    new_input["questions"] = [first] + list(questions[1:])
+    return new_input
 
 
 def main_pre(ctx):
@@ -809,10 +836,16 @@ def main_pre(ctx):
         if action == PASS:
             try:
                 message = card_message(event, ctx)
+                new_input = with_card(event.get("tool_input"), message) if message else None
             except Exception:
-                message = None
-            if message:
-                print(json.dumps({"systemMessage": message}, ensure_ascii=False))
+                new_input = None
+            if new_input is not None:
+                print(json.dumps({"hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "allow",
+                    "permissionDecisionReason": "skill-bound: 선택 버튼에 점검 카드를 붙였습니다.",
+                    "updatedInput": new_input,
+                }}, ensure_ascii=False))
                 return 0
     except Exception:
         # 상태를 알 수 있으면 평소 모드는 통과, 그 밖에는 막는다.
