@@ -207,6 +207,12 @@ class StartEndTest(VetBase):
         self.assertEqual(guard.get_mode(self.ctx, SID)[0], "normal")
         self.assertEqual(vet.end(SID, self.ctx)["status"], "NOTHING_TO_END")
 
+    def test_end_removes_card(self):
+        q = self.start_local()["quarantine"]
+        guard.save_card(self.state, q, "card")
+        vet.end(SID, self.ctx)
+        self.assertIsNone(guard.load_card(self.state, q))
+
     def test_end_broken_state(self):
         os.makedirs(os.path.join(self.state, "sessions"))
         self.write(guard.session_state_path(self.state, SID), "{broken")

@@ -44,6 +44,10 @@ def _load_sibling(name):
 sys.dont_write_bytecode = True
 scan = _load_sibling("scan")
 
+_guard_spec = importlib.util.spec_from_file_location("skill_bound_guard", os.path.join(os.path.dirname(HERE), "hooks", "guard.py"))
+guard = importlib.util.module_from_spec(_guard_spec)
+_guard_spec.loader.exec_module(guard)  # type: ignore
+
 # ---------------------------------------------------------------------------
 # 체크리스트 양식
 # ---------------------------------------------------------------------------
@@ -678,7 +682,13 @@ def main(argv=None):
     report = combine(scan_result, reader_result)
     if args.format == "card":
         # 요약 카드를 먼저, 그 아래에 보고서 원문. SKILL.md는 카드만 보여 주고 원문은 요청할 때만 보여 준다.
-        print(format_card(report))
+        card = format_card(report)
+        # 버튼이 뜰 때 훅이 화면에 직접 보여 줄 수 있게 상태 폴더에 저장한다.
+        try:
+            guard.save_card(guard.Ctx().state_dir, root_real, card)
+        except OSError:
+            pass
+        print(card)
         print("")
         print(FULL_REPORT_MARK)
         print(format_text(report))

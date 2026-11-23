@@ -418,6 +418,8 @@ def end(session_id, ctx):
             os.unlink(manifest_path(ctx, quarantine))
         except OSError:
             pass
+    if quarantine:
+        guard.remove_card(ctx.state_dir, quarantine)  # type: ignore
     guard.clear_session_state(ctx.state_dir, session_id)  # type: ignore
     return {"status": "ENDED", "message": MESSAGES["ENDED"]}
 

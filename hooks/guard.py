@@ -196,6 +196,35 @@ def any_vet_active(ctx):
     return False
 
 
+def card_path(state_dir, quarantine):
+    # type: (str, str) -> str
+    """reader.py가 만든 요약 카드를 두는 곳. 상태 폴더 안이라 Claude가 바꿀 수 없다."""
+    return os.path.join(state_dir, "reports", os.path.basename(os.path.realpath(quarantine)) + ".json")
+
+
+def save_card(state_dir, quarantine, card):
+    # type: (str, str, str) -> None
+    _atomic_write_json(card_path(state_dir, quarantine), {"card": card})
+
+
+def load_card(state_dir, quarantine):
+    # type: (str, str) -> Optional[str]
+    try:
+        with open(card_path(state_dir, quarantine), encoding="utf-8") as handle:
+            card = json.load(handle).get("card")
+    except (OSError, ValueError, AttributeError):
+        return None
+    return card if isinstance(card, str) and len(card) < 20000 else None
+
+
+def remove_card(state_dir, quarantine):
+    # type: (str, str) -> None
+    try:
+        os.unlink(card_path(state_dir, quarantine))
+    except OSError:
+        pass
+
+
 def get_mode(ctx, session_id):
     # type: (Ctx, object) -> Tuple[str, Optional[str]]
     """("off" | "normal" | "vet" | "broken", 격리 폴더).
@@ -754,12 +783,37 @@ def _read_event():
     return data
 
 
+def card_message(event, ctx):
+    # type: (Dict[str, object], Ctx) -> Optional[str]
+    """점검 모드에서 Claude가 선택 버튼(AskUserQuestion)을 띄우기 직전이면, 요약 카드를 돌려준다.
+
+    통합 시험에서 Claude가 "카드를 답변에 옮겨 적어라"는 지시를 건너뛰어, 버튼만 뜨고 카드가
+    보이지 않았다. 그래서 카드는 Claude를 거치지 않고 훅이 화면에 직접 보여 준다. 속은 Claude가
+    카드 내용을 바꿔 말할 수도 없게 된다.
+    """
+    if event.get("tool_name") != "AskUserQuestion":
+        return None
+    mode, quarantine = get_mode(ctx, event.get("session_id"))
+    if mode != "vet" or quarantine is None:
+        return None
+    card = load_card(ctx.state_dir, quarantine)
+    return "skill-bound 점검 결과\n\n" + card if card else None
+
+
 def main_pre(ctx):
     # type: (Ctx) -> int
     event = None  # type: Optional[Dict[str, object]]
     try:
         event = _read_event()
         action, code = decide(event, ctx)
+        if action == PASS:
+            try:
+                message = card_message(event, ctx)
+            except Exception:
+                message = None
+            if message:
+                print(json.dumps({"systemMessage": message}, ensure_ascii=False))
+                return 0
     except Exception:
         # 상태를 알 수 있으면 평소 모드는 통과, 그 밖에는 막는다.
         action, code = DENY, "GUARD_ERROR"
