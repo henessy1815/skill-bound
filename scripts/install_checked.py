@@ -13,7 +13,7 @@ guard.py가 이 명령을 실행하기 전에 사람에게 허락을 묻는다.
 4. 맨 위에 SKILL.md가 있는지 (이번 범위는 스킬만 설치한다)
 5. 설치할 위치에 이미 무언가 있지 않은지 (덮어쓰지 않는다)
 
-설치한 뒤에는 실행 권한을 빼고, 복사본의 해시를 다시 확인하고, 세션 시작 기준선에
+설치한 뒤에는 실행 권한을 원래대로 두고, 복사본의 해시를 다시 확인하고, 승인 목록과 세션 시작 기준선에
 등록하고, 점검 모드를 끈다.
 
 파이썬 3.9 문법까지만 쓰고, 표준 라이브러리만 쓴다.
@@ -41,7 +41,7 @@ vet = _load(os.path.join(HERE, "vet.py"), "skill_bound_vet")
 guard = vet.guard
 
 MESSAGES = {
-    "INSTALLED": "점검한 파일과 해시가 모두 같아 설치했습니다. 실행 권한은 뺐고 점검 모드는 껐습니다.",
+    "INSTALLED": "점검한 파일과 해시가 모두 같아 설치했습니다. 이 스킬 폴더 안의 준비 작업(패키지 설치 등)은 skill-bound가 막지 않습니다. 점검 모드는 껐습니다.",
     "NO_SESSION": "이 세션의 id를 알 수 없어 설치하지 않았습니다.",
     "NOT_VETTING": "이 세션에서 점검 중인 격리 폴더가 아니어서 설치하지 않았습니다.",
     "NO_MANIFEST": "받을 때 남긴 해시 기록이 없거나 읽을 수 없어 설치하지 않았습니다.",
@@ -63,7 +63,11 @@ class InstallError(Exception):
 
 def _copy_exact(src_root, dest_root, files):
     # type: (str, str, Dict[str, str]) -> None
-    """목록에 있는 파일만, 새로 만드는 방식(O_EXCL)으로 복사한다. 실행 권한 없이 0644."""
+    """목록에 있는 파일만, 새로 만드는 방식(O_EXCL)으로 복사한다.
+
+    실행 권한은 받은 파일 그대로 둔다(실행 파일은 0755, 나머지는 0644). 처음엔 모두 뺐는데,
+    `./run.sh` 처럼 바로 실행하는 스킬이 "권한 없음"으로 멈춰 사용을 방해했다.
+    """
     os.mkdir(dest_root, 0o755)
     for rel in sorted(files):
         parts = rel.split("/")
@@ -73,11 +77,13 @@ def _copy_exact(src_root, dest_root, files):
         parent = os.path.dirname(target)
         if not os.path.isdir(parent):
             os.makedirs(parent, 0o755)
-        src_fd = os.open(os.path.join(src_root, *parts), os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        src_path = os.path.join(src_root, *parts)
+        mode = 0o755 if os.lstat(src_path).st_mode & 0o111 else 0o644
+        src_fd = os.open(src_path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
         dst_fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o644)
         with os.fdopen(src_fd, "rb") as src, os.fdopen(dst_fd, "wb") as dst:
             shutil.copyfileobj(src, dst)
-        os.chmod(target, 0o644)
+        os.chmod(target, mode)
 
 
 def _register_baselines(ctx, name, target):
@@ -146,6 +152,7 @@ def install(quarantine_arg, session_id, ctx):
         raise InstallError("COPY_FAILED")
 
     _register_baselines(ctx, name, target)
+    guard.add_approved(ctx.state_dir, name, target)  # type: ignore
     vet.end(session_id, ctx)
     return {"status": "INSTALLED", "message": MESSAGES["INSTALLED"], "target": target, "files": len(files)}
 

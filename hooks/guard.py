@@ -228,6 +228,77 @@ def remove_card(state_dir, quarantine):
         pass
 
 
+# ---------------------------------------------------------------------------
+# 승인된 스킬 (점검을 거쳐 사람이 설치를 고른 스킬)
+#
+# 판정 색과 상관없이, 사람이 설치를 고르고 허락한 스킬은 "꼭 써야 하는 스킬"이다.
+# 그 스킬 폴더 안의 준비 작업(npm install, chmod, git pull, 캐시 쓰기)은 막지 않고,
+# 그 폴더 안의 변화는 세션 시작 알림에서도 뺀다. 목록은 상태 폴더에 있어 Claude가 바꿀 수 없다.
+# ---------------------------------------------------------------------------
+
+def approved_path(state_dir):
+    # type: (str) -> str
+    return os.path.join(state_dir, "approved.json")
+
+
+def load_approved(ctx):
+    # type: (Ctx) -> Dict[str, str]
+    """{스킬 이름: 설치 폴더 실제 경로}. 지금도 있는 폴더만."""
+    try:
+        with open(approved_path(ctx.state_dir), encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        return {}
+    skills = data.get("skills") if isinstance(data, dict) else None
+    if not isinstance(skills, dict):
+        return {}
+    root = os.path.realpath(os.path.join(ctx.home, ".claude", "skills"))
+    out = {}  # type: Dict[str, str]
+    for name, path in skills.items():
+        if not isinstance(name, str) or not isinstance(path, str):
+            continue
+        real = os.path.realpath(path)
+        # ~/.claude/skills 바로 아래의 폴더만, skill-bound 자신은 절대 승인 목록에 넣지 않는다.
+        if os.path.dirname(real) == root and os.path.isdir(real) and real != ctx.sb_dir:
+            out[name] = real
+    return out
+
+
+def add_approved(state_dir, name, path):
+    # type: (str, str, str) -> None
+    current = {}  # type: Dict[str, object]
+    try:
+        with open(approved_path(state_dir), encoding="utf-8") as handle:
+            data = json.load(handle)
+        if isinstance(data, dict) and isinstance(data.get("skills"), dict):
+            current = data["skills"]
+    except (OSError, ValueError):
+        pass
+    current[name] = os.path.realpath(path)
+    _atomic_write_json(approved_path(state_dir), {"skills": current})
+
+
+PARENT_REF_RE = re.compile(r"(^|[\s/=:'\"])\.\.(/|\s|$|['\"])")
+
+
+def strip_approved(norm, approved):
+    # type: (str, Dict[str, str]) -> str
+    """정규화한 명령에서 승인된 스킬 폴더 경로를 지운다. 남은 글로 다시 판단하기 위해.
+
+    `..` 가 있으면 경로를 빠져나갈 수 있으니 지우지 않는다(원래 판단 그대로).
+    """
+    if "/.." in norm:
+        return norm
+    for path in approved.values():
+        norm = re.sub(re.escape(path.lower()) + r"(?=/|\s|$|[;&|)])", " ", norm)
+    return norm
+
+
+def inside_approved(path, approved):
+    # type: (str, Dict[str, str]) -> bool
+    return any(inside_loose(path, folder) for folder in approved.values())
+
+
 def get_mode(ctx, session_id):
     # type: (Ctx, object) -> Tuple[str, Optional[str]]
     """("off" | "normal" | "vet" | "broken", 격리 폴더).
@@ -505,12 +576,17 @@ def decide_normal(tool_name, tool_input, cwd, ctx):
         # 설치된 스킬이 자기 스크립트를 실행하는 것(python3 ~/.claude/skills/x/run.py)은 평범한 사용이다.
         # 그래서 설정 경로를 언급하면서 "파일을 바꾸는 명령"까지 있을 때만 막는다.
         if not read_only and writes_something(command, norm):
-            if INSTALL_MENTION_RE.search(norm):
+            # 승인된 스킬 폴더 안의 일(npm install, chmod, git pull 등)은 그 경로를 지우고 다시 본다.
+            approved = load_approved(ctx)
+            rest = strip_approved(norm, approved) if approved else norm
+            if INSTALL_MENTION_RE.search(rest):
                 return DENY, "INSTALL_BLOCKED"
-            if CONFIG_MENTION_RE.search(norm) or (ctx.home.lower() + "/.claude") in norm:
+            if CONFIG_MENTION_RE.search(rest) or (ctx.home.lower() + "/.claude") in rest:
                 return DENY, "CONFIG_BASH"
             if _cwd_in_claude_dir(cwd):
-                return DENY, "CONFIG_BASH"
+                # 승인된 스킬 폴더 안이라도 `..` 로 빠져나가 옆 폴더를 건드리면 막는다.
+                if not inside_approved(os.path.realpath(cwd), approved) or PARENT_REF_RE.search(command):
+                    return DENY, "CONFIG_BASH"
         return PASS, "OK"
 
     if tool_name in WRITE_TOOLS:
@@ -520,6 +596,8 @@ def decide_normal(tool_name, tool_input, cwd, ctx):
         target = resolve_path(raw, cwd, ctx.home)
         if inside_loose(target, ctx.sb_dir) or inside_loose(target, ctx.state_dir):
             return DENY, "PROTECTED"
+        if inside_approved(target, load_approved(ctx)):
+            return PASS, "OK"
         code = classify_config_path(target)
         if code == "SETTINGS_ASK":
             if removes_our_hook(tool_name, tool_input, target):
@@ -825,7 +903,14 @@ def session_start(event, ctx):
     new = collect_inventory(ctx, project_dir)
     old = load_baseline(path)
     save_baseline(path, new)
-    if old is None or old == new:
+    if old is None:
+        return None
+    # 승인된 스킬 폴더 안의 변화(스스로 업데이트, 캐시 등)는 알리지 않는다.
+    quiet = tuple("user-skills:%s/" % name for name in load_approved(ctx))
+    if quiet:
+        old = {k: v for k, v in old.items() if not k.startswith(quiet)}
+        new = {k: v for k, v in new.items() if not k.startswith(quiet)}
+    if old == new:
         return None
     added, changed, removed = diff_baseline(old, new)
 

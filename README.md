@@ -30,6 +30,8 @@
 - skill-bound 폴더나 상태 폴더를 바꾸려 할 때: 막음
 - Claude가 `.claude/settings.json` 을 고치려 할 때, 점검을 마친 스킬을 설치할 때: 사람에게 물음
 
+점검을 거쳐 설치한 스킬은 판정 색과 상관없이 사람이 쓰기로 고른 스킬입니다. 그래서 그 스킬 폴더 안의 준비 작업(`npm install`, `pip install`, `chmod`, `git pull`, 캐시 파일 쓰기)은 막지 않고, 그 폴더 안의 변화는 세션 시작 알림에서도 뺍니다. 실행 권한도 원래 저장소 그대로 둡니다.
+
 ## 사용법
 
 Claude에게 말로 부탁하면 됩니다.
@@ -83,7 +85,7 @@ cp -R /tmp/skill-bound/SKILL.md /tmp/skill-bound/hooks /tmp/skill-bound/scripts 
 | `scripts/scan.py` | 정적 스캔: 받아서 바로 실행, 정보 유출, 자동 실행 등록, 비밀 정보 접근, AI를 노린 숨은 지시, 보이지 않는 문자 등 |
 | `scripts/reader.py` | 밀폐 읽기실 실행, 결과 양식 검사, 정적 스캔과 합친 신호등 카드 만들기 |
 | `scripts/reader_guard.py` | 밀폐 읽기실에만 붙는 훅. 읽기 도구 말고는 쓰지 못하게, 격리 폴더 밖은 읽지 못하게 한 번 더 막음 |
-| `scripts/install_checked.py` | 받을 때 기록한 해시와 똑같은 파일만 설치. 덮어쓰지 않고 실행 권한을 뺌 |
+| `scripts/install_checked.py` | 받을 때 기록한 해시와 똑같은 파일만 설치. 덮어쓰지 않고, 설치한 스킬을 승인 목록에 올림 |
 | `scripts/switch.py` | 훅 등록, 끄기, 다시 켜기, 완전히 지우기 |
 
 점검 기록을 두는 `~/.claude/skill-bound-state/` 는 각 컴퓨터에서 처음 쓸 때 저절로 생기므로 저장소에는 없습니다.
@@ -107,4 +109,5 @@ mkdir -p ~/.claude/skill-bound-state && touch ~/.claude/skill-bound-state/OFF
 - 점검 중에는 MCP 도구가 전부 막히므로, MCP로 동작하는 다른 기능도 점검이 끝날 때까지 쓸 수 없습니다.
 - 훅이 고장 나면 안전을 위해 평소 작업까지 막힙니다.
 - 🟢은 안전 보증이 아니라 설치 전 1차 검문입니다.
+- skill-bound는 설치 전에 알려 주는 검문소입니다. 🔴인데도 설치한 스킬이 실제로 위험한 동작(비밀 정보 읽기, 외부로 보내기 등)을 하면, 설치한 뒤에는 막지 않습니다.
 - skill-bound로 skill-bound 자신을 점검하면 🔴이 나옵니다. 위험 패턴을 찾는 규칙 안에 `curl ... | sh` 같은 찾으려는 말이 그대로 들어 있어서이고, 밀폐 읽기실은 훅 등록, git clone, 지우기 기능 같은 skill-bound 본래 기능만 짚어 🟡으로 판단했습니다.

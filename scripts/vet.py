@@ -234,7 +234,7 @@ def copy_local(src, dest):
                 continue
             elif stat.S_ISREG(mode):
                 shutil.copyfile(full, target, follow_symlinks=False)
-                os.chmod(target, 0o600)
+                os.chmod(target, 0o700 if mode & 0o111 else 0o600)
                 count += 1
             else:
                 raise VetError("SPECIAL_FILE")
